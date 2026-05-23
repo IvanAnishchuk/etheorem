@@ -1,0 +1,77 @@
+name: Lean Action CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      conformance_limit:
+        description: 'Per-suite case cap for the conformance run (use "all" for the full sweep)'
+        default: '1'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Pinned to the commit `v1` resolves to as of 2026-05-10. Bump deliberately.
+      - uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9
+
+  forbidden-tokens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Reject sorry / #eval / #check / #print in committed Lean
+        # `git grep` searches tracked files only and returns 1 when no matches —
+        # avoids `xargs -r grep`'s empty-input ambiguity (which exits 0).
+        run: |
+          set -euo pipefail
+          if git grep -nE '(\bsorry\b|^[[:space:]]*#(eval|check|print)\b)' -- '*.lean'; then
+            echo "::error::Forbidden token found in committed Lean source (CLAUDE.md)."
+            exit 1
+          fi
+
+  conformance:
+    # Stage 14a/b acceptance: passes upstream consensus-specs vectors.
+    # Default subset (--limit 1) is the smoke gate that keeps CI under ~15 min;
+    # workflow_dispatch with `conformance_limit: all` runs the full sweep.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Cache consensus-spec-tests archives
+        # Cache only the .tar.gz files (~490 MB for minimal + general);
+        # the extracted trees (~4 GB total) re-build on each run via the
+        # `ensure_archive` path in run_conformance.py — extraction is
+        # ~1 min, much cheaper than the GitHub-side cache transfer would be.
+        # Keyed on the tag baked into the script — bumping it invalidates.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sizzlean/v1.5.0-*.tar.gz
+          key: consensus-spec-tests-v1.5.0-archives
+
+      - uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9
+        with:
+          # `lean-action` builds Lake's targets by default; we need
+          # `sizz_test` for the conformance script to invoke. The default
+          # target (the library) is built transitively.
+          lake-package-directory: '.'
+          build-args: 'sizz_test'
+
+      - name: Run conformance suite (minimal preset, subset)
+        run: |
+          set -euo pipefail
+          LIMIT='${{ github.event.inputs.conformance_limit || '1' }}'
+          if [ "$LIMIT" = "all" ]; then
+            python3 scripts/run_conformance.py --suite all --config minimal --all
+          else
+            python3 scripts/run_conformance.py --suite all --config minimal --limit "$LIMIT"
+          fi

@@ -1,0 +1,14 @@
+# SizzLean conformance harness (`scripts/run_conformance.py`)
+# Python dependencies. Install with:
+#
+#   uv venv
+#   uv pip install -r scripts/requirements.txt
+#
+# (`uv` is pre-installed on the dev machine; for environments without uv,
+# create a venv via `python3 -m venv .venv` and use that venv's pip.)
+#
+# Pinned versions match what's been smoke-tested; loose pins are fine for
+# this tooling — no API surface is fragile across patch releases.
+cramjam>=2.0
+PyYAML>=6.0
+tqdm>=4.65
