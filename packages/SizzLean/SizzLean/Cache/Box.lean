@@ -67,6 +67,7 @@ set_option autoImplicit false
 namespace SizzLean.Cache
 
 open SizzLean.Hasher
+open SizzLean.Spec (SSZError)
 
 namespace SSZ
 
@@ -209,6 +210,41 @@ for hasher-flexible spec functions. -/
 abbrev UncachedBox (H : Type) [Hasher H] {T : Type} [SSZRepr T] (v : T) :
     Box H T :=
   Box.ofPure H v
+
+/-! ### Deserialisers — IO-side companions to the four constructors
+
+`SSZ.deserialize` decodes wire bytes into a plain Lean value; each
+`*Box.deserialize` below threads the resulting `T` straight into
+the matching `Box` flavour. Reads symmetrically with `.serialize`
+on a Box: bytes go out via `box.serialize`, come back in via
+`SSZ.FastBox.deserialize` (or any of the four flavours below).
+
+Each helper preserves the `Except` shape — a malformed buffer
+short-circuits to `.error e` without constructing a Box. -/
+
+/-- Deserialise SSZ bytes straight into a `FastBox`. The IO-side
+companion to `SSZ.FastBox v`. -/
+def FastBox.deserialize {T : Type} [SSZRepr T] (b : ByteArray) :
+    Except SSZError (Box Sha256 T) :=
+  (SSZ.deserialize b).map FastBox
+
+/-- Deserialise SSZ bytes straight into a `PureBox`. The IO-side
+companion to `SSZ.PureBox v`. -/
+def PureBox.deserialize {T : Type} [SSZRepr T] (b : ByteArray) :
+    Except SSZError (Box Sha256 T) :=
+  (SSZ.deserialize b).map PureBox
+
+/-- Deserialise SSZ bytes straight into a `CachedBox` with the
+given hasher. The IO-side companion to `SSZ.CachedBox H v`. -/
+def CachedBox.deserialize (H : Type) [Hasher H] {T : Type} [SSZRepr T]
+    (b : ByteArray) : Except SSZError (Box H T) :=
+  (SSZ.deserialize b).map (CachedBox H)
+
+/-- Deserialise SSZ bytes straight into an `UncachedBox` with the
+given hasher. The IO-side companion to `SSZ.UncachedBox H v`. -/
+def UncachedBox.deserialize (H : Type) [Hasher H] {T : Type} [SSZRepr T]
+    (b : ByteArray) : Except SSZError (Box H T) :=
+  (SSZ.deserialize b).map (UncachedBox H)
 
 end SSZ
 

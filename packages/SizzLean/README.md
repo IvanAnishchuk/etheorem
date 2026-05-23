@@ -1,6 +1,6 @@
 ![SizzLean](sizzlean_cartoon.jpeg)
 
-# SizzLean - Serialization, well-done.
+# SizzLean - serialization, part of a well verified breakfast.
 
 A Lean 4 implementation of Ethereum's
 [SSZ](https://github.com/ethereum/consensus-specs/blob/dev/ssz/simple-serialize.md)
@@ -27,6 +27,15 @@ theorems.
   consensus-container tests). SHA-256 passes the NIST CAVP
   vectors on every hasher the library ships.
 
+- **Literate by default.** SizzLean sits at the intersection of
+  two specialist worlds — SSZ and Lean 4 — and most readers only
+  know one. The library is written with comments that teach the
+  reader what the code does *and* the Lean idioms it uses, so a
+  Lean-fluent reader can pick up the SSZ semantics and an
+  SSZ-fluent reader can pick up the Lean. The cost is paid once
+  when the code is written; the dividend compounds with every new
+  contributor.
+
 - **Fast hash-tree-root.** Updates are incremental: only the
   path from a changed field to the root rehashes. Multi-field
   updates batch the work across overlapping paths.
@@ -45,15 +54,6 @@ theorems.
   can be Poseidon2 — or whatever the Beam Chain redesign settles
   on — without rewriting your containers, your proofs, or your
   cache logic.
-
-- **Literate by default.** SizzLean sits at the intersection of
-  two specialist worlds — SSZ and Lean 4 — and most readers only
-  know one. The library is written with comments that teach the
-  reader what the code does *and* the Lean idioms it uses, so a
-  Lean-fluent reader can pick up the SSZ semantics and an
-  SSZ-fluent reader can pick up the Lean. The cost is paid once
-  when the code is written; the dividend compounds with every new
-  contributor.
 
 - **Every Ethereum consensus fork covered.** Phase 0 through
   Gloas, including the new ePBS containers.
