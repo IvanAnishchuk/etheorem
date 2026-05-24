@@ -3,7 +3,15 @@ import SizzLean.Repr.Class
 import SizzLean.Spec.HashTreeRoot
 
 /-!
-# `SizzLean.Cache.Uncached` — bare wrapper, internal to `SSZ.Box`
+# `SizzLean.Cache.Uncached` — the **pure (uncached) backend**
+
+This file is the home of `UncachedSSZ H T` — the **pure** branch
+of the two-backend story documented in `Cache/Box.lean`. The
+companion **fast (cached)** backend lives in
+`Cache/TreeBacked.lean` (`CachedSSZ`); `Cache/Box.lean`'s
+`SSZ.Box` sum closes the two together and defines the four
+user-facing smart constructors (`SSZ.PureBox` / `SSZ.FastBox`
+and the hasher-explicit `SSZ.UncachedBox` / `SSZ.CachedBox`).
 
 > ### Most readers should not be here.
 >

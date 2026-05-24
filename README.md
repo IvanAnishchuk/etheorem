@@ -2,6 +2,12 @@
 
 # Etheorem
 
+> **Status — early-stage, experimental, single-developer; personal
+> project, not an EF release.** The libraries here pass the
+> upstream consensus-spec test corpus and ship the three central
+> SSZ theorems on a `BasicSupported` cut, but production-grade
+> stability and a stable release line are not implied.
+
 A Lean 4 monorepo for Ethereum consensus-spec types and SSZ
 ([Simple Serialize](https://github.com/ethereum/consensus-specs/blob/dev/ssz/simple-serialize.md))
 with machine-checked correctness on the verified core.

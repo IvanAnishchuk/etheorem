@@ -9,7 +9,16 @@ import SizzLean.Cache.MerkleTree.SetAt
 import SizzLean.Spec.HashTreeRoot
 
 /-!
-# `SizzLean.Cache.TreeBacked` — value-and-tree user surface
+# `SizzLean.Cache.TreeBacked` — the **fast (cached) backend**
+
+This file is the home of `CachedSSZ H T` — the **fast** branch
+of the two-backend story documented in `Cache/Box.lean`. The
+companion **pure (uncached)** backend lives in
+`Cache/Uncached.lean`; `Cache/Box.lean`'s `SSZ.Box` sum closes
+the two together and defines the four user-facing smart
+constructors (`SSZ.FastBox` / `SSZ.PureBox` and the
+hasher-explicit `SSZ.CachedBox` / `SSZ.UncachedBox`). Start with
+`Cache/Box.lean`'s module docstring for the brand framing.
 
 ARCHITECTURE.md §6.3. The user-facing pairing of a Lean value
 `view : T` with a `Node`-shaped Merkle backing

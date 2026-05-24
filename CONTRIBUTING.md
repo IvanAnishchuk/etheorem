@@ -64,6 +64,44 @@ Per-subpackage design docs (currently only `SizzLean` has them):
 - `packages/SizzLean/docs/OPTIMISATION.md` — cache-layer
   implementation-level companion.
 
+### Inside `packages/SizzLean/` — where to look for what
+
+A quick orientation map for the most-asked questions:
+
+- **Fast backend (cached / FFI-hashed / production).** Lives in
+  `packages/SizzLean/SizzLean/Cache/TreeBacked.lean`
+  (`CachedSSZ H T`). User-facing smart constructor:
+  `SSZ.FastBox` in `Cache/Box.lean`.
+- **Pure backend (uncached / proof-friendly).** Lives in
+  `packages/SizzLean/SizzLean/Cache/Uncached.lean`
+  (`UncachedSSZ H T`). User-facing smart constructor:
+  `SSZ.PureBox` in `Cache/Box.lean`.
+- **The box that unifies them.**
+  `packages/SizzLean/SizzLean/Cache/Box.lean` — `SSZ.Box H T`
+  closes the two backends into one sum type, and its module
+  docstring documents the brand axes; start here for the
+  user-facing surface.
+- **Central theorems.** `packages/SizzLean/SizzLean/Proofs/` —
+  `Roundtrip.lean` (`decode_encode`), `Injective.lean`
+  (`serialize_injective`), `SizeBound.lean`
+  (`encode_size_le_max`). All three ship on the
+  `SSZType.BasicSupported` cut defined in
+  `packages/SizzLean/SizzLean/Spec/BasicSupported.lean`; the
+  universally-quantified `Supported` form is open work tracked
+  in `packages/SizzLean/docs/PLAN.md` Phase 5.
+- **Trust boundary (FFI SHA-256).**
+  `packages/SizzLean/SizzLean/Hasher/Sha256.lean`,
+  `Sha256Equiv.lean`, and `Sha256Batch.lean`. The complete
+  inventory (3 named `axiom`s plus 3 `@[extern] opaque`
+  primitives) is recoverable with one grep — see SizzLean's
+  README "Trust assumptions you can grep for".
+- **Upstream-vector harness.** `scripts/run_conformance.py` at
+  the umbrella root, driving the
+  `eth_ssz_vector_runner` CLI in the sibling `LeanEthCS`
+  subpackage. The one-command entry point is
+  `just official-ssz-vector-tests-all`; smaller subsets and
+  per-suite recipes live in the `Justfile`.
+
 ## Code style and discipline
 
 `CLAUDE.md` at the repo root documents the project's conventions

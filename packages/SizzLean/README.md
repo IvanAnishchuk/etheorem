@@ -2,6 +2,14 @@
 
 # SizzLean - serialization, part of a well verified breakfast.
 
+> **Status — early-stage, experimental, single-developer; personal
+> project, not an EF release.** The library passes the upstream
+> consensus-spec test corpus and the three central theorems are
+> landed on the `BasicSupported` cut (open work toward `Supported`
+> is tracked in [`docs/PLAN.md`](docs/PLAN.md) Phase 5). Reviews,
+> issues, and pull requests are welcome; production-grade
+> stability and a stable release line are not implied.
+
 A Lean 4 implementation of Ethereum's
 [SSZ](https://github.com/ethereum/consensus-specs/blob/dev/ssz/simple-serialize.md)
 (Simple Serialize): serialization, deserialization, Merkleization,
@@ -49,9 +57,25 @@ theorems.
   free, per type, with no hand-written proofs.
 
 - **Trust assumptions you can grep for.** Every reliance on the
-  C SHA-256 implementation is named and audit-listed — it shows
-  up in any proof's trust footprint, and is replaceable later
-  by a proof without touching a single theorem statement.
+  C SHA-256 implementation is a named Lean `axiom` (or its
+  `@[extern] opaque` FFI declaration) in `SizzLean/Hasher/`, and
+  shows up in any proof's trust footprint. The complete inventory
+  is recoverable with one grep:
+
+  ```bash
+  grep -rEn '^axiom |^@\[extern' packages/SizzLean --include='*.lean'
+  ```
+
+  Today this returns three `axiom`s (`sha256Hash_eq_spec`,
+  `sha256Combine_eq_spec`, `sha256BatchCombine_eq_spec`) plus
+  three `@[extern] opaque` FFI primitives (`sha256Hash`,
+  `sha256Combine`, `sha256BatchCombine`) — six real declarations,
+  all under `SizzLean/Hasher/`. The grep also surfaces a handful
+  of docstring mirrors (the same lines repeated inside a `/-- … -/`
+  block where the surrounding prose explains them); those are
+  intentional, not extra trust commitments. Each real declaration
+  is replaceable later by a `@[csimp]`-proved theorem without
+  touching a single dependent theorem statement.
 
 - **Pluggable hash function.** Today it's SHA-256. Tomorrow it
   can be Poseidon2 — or whatever the Beam Chain redesign settles
@@ -205,14 +229,43 @@ subpackages stay on declarative TOML.
   `deserialize`, `hashTreeRoot`. The verified core.
 * `Repr/` — the `SSZRepr` typeclass + deriving handler.
 * `Hasher/` — abstract `Hasher` typeclass; `Sha256` (FFI) +
-  `Sha256Spec` (pure-Lean) instances; `Sha256Equiv` (the named
-  equivalence axiom).
-* `Cache/` — `TreeBacked` / `UncachedSSZ` / `SSZ.Box` types,
-  `sszUpdate` macro, Merkle-tree machinery.
+  `Sha256Spec` (pure-Lean) instances; `Sha256Equiv` /
+  `Sha256Batch` (the named equivalence axioms — see "Trust
+  assumptions you can grep for" above).
+* `Cache/` — both backends and the box layer that unifies them:
+  * `Cache/TreeBacked.lean` — the **fast / cached** backend
+    (`CachedSSZ H T`): production-side, FFI-hashed, O(log N)
+    incremental updates.
+  * `Cache/Uncached.lean` — the **pure / uncached** backend
+    (`UncachedSSZ H T`): proof-side, no cache invariant, kernel-
+    reducible when paired with `Sha256Spec`.
+  * `Cache/Box.lean` — `SSZ.Box H T` closes the two backends
+    into one user-facing sum type, and defines the four smart
+    constructors (`SSZ.FastBox` / `SSZ.PureBox` /
+    `SSZ.CachedBox` / `SSZ.UncachedBox`). Its module docstring
+    documents the brand axes; start here for the user-facing
+    surface.
+  * `Cache/MerkleTree/` — the tree machinery the fast backend
+    sits on; `Cache/Update.lean` is the `sszUpdate` macro.
 * `Proofs/` — central proof artefacts and `@[ssz_simp]` set.
+  The three central theorems (`decode_encode`,
+  `serialize_injective`, `encode_size_le_max`) live in
+  `Proofs/Roundtrip.lean`, `Proofs/Injective.lean`, and
+  `Proofs/SizeBound.lean` respectively. All three are landed on
+  the `SSZType.BasicSupported` cut (defined in
+  `Spec/BasicSupported.lean`); the universally-quantified
+  `Supported` form is open work — see
+  [`docs/PLAN.md`](docs/PLAN.md) Phase 5.
 * `Conformance/` — SSZ-library property-test gates (Sha256
   vectors, hasher equivalence, `setAt` randomised tests, cache
   machinery on example containers).
+
+The CLI driver that runs the upstream consensus-spec-tests
+corpus (`eth_ssz_vector_runner`) lives in the sibling
+[`LeanEthCS`](../LeanEthCS) subpackage, driven by
+`scripts/run_conformance.py` at the umbrella root. Use the
+one-command `just official-ssz-vector-tests-all` entry point
+documented in [Build / test](#build--test) to drive it.
 
 ## Build / test
 
