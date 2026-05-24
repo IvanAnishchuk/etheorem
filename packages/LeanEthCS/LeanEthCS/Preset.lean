@@ -17,7 +17,8 @@ expansion time. This module defines:
 
 Values transcribed from
 [ethereum/consensus-specs](https://github.com/ethereum/consensus-specs)
-`presets/{minimal,mainnet}/<fork>.yaml`, release v1.5.0.
+`presets/{minimal,mainnet}/<fork>.yaml` at the tag pinned in
+`scripts/run_conformance.py`'s `DEFAULT_TAG`.
 
 ## Scope
 
@@ -54,17 +55,25 @@ structure Preset where
   SYNC_COMMITTEE_SIZE               : Nat
   -- Capella
   MAX_WITHDRAWALS_PER_PAYLOAD       : Nat
-  -- Deneb. Both of these are preset-sensitive at v1.5.0:
-  --   * `MAX_BLOB_COMMITMENTS_PER_BLOCK` — 32 minimal / 4096 mainnet
-  --   * `KZG_COMMITMENT_INCLUSION_PROOF_DEPTH` — 10 minimal / 17 mainnet
-  --     (derived from BBB's gindex; depends on the prior preset)
+  -- Deneb. Both presets agree on these today, but they're kept as
+  -- preset-record fields rather than literals so the macro surface
+  -- stays uniform across forks and a future preset divergence
+  -- doesn't need a structural change. `KZG_COMMITMENT_INCLUSION_PROOF_DEPTH`
+  -- is derived from `BeaconBlockBody`'s gindex via
+  -- `ceillog2(MAX_BLOB_COMMITMENTS_PER_BLOCK) + 5`.
   MAX_BLOB_COMMITMENTS_PER_BLOCK       : Nat
   KZG_COMMITMENT_INCLUSION_PROOF_DEPTH : Nat
   -- Electra
   PENDING_PARTIAL_WITHDRAWALS_LIMIT : Nat
   PENDING_CONSOLIDATIONS_LIMIT      : Nat
-  -- Gloas (EIP-7732 ePBS). Most are preset-invariant; `PTC_SIZE`
-  -- and `MAX_BUILDERS_PER_WITHDRAWALS_SWEEP` are preset-sensitive.
+  -- Gloas (EIP-7732 ePBS). `PTC_SIZE` is preset-sensitive
+  -- (2 minimal / 512 mainnet); the others agree across presets but
+  -- stay as preset-record fields for macro uniformity.
+  -- `BUILDER_REGISTRY_LIMIT` and `MAX_BUILDERS_PER_WITHDRAWALS_SWEEP`
+  -- aren't part of the upstream Gloas spec but are referenced by the
+  -- current LeanEthCS Gloas schema (which still carries a `builders`
+  -- list); the Gloas surface is not yet in the CLI dispatch table,
+  -- so these values don't affect the conformance sweep.
   PTC_SIZE                            : Nat
   MAX_PAYLOAD_ATTESTATIONS            : Nat
   BUILDER_REGISTRY_LIMIT              : Nat
@@ -85,11 +94,11 @@ def minimal : Preset :=
     EPOCHS_PER_SLASHINGS_VECTOR          := 64
     SYNC_COMMITTEE_SIZE                  := 32
     MAX_WITHDRAWALS_PER_PAYLOAD          := 4
-    MAX_BLOB_COMMITMENTS_PER_BLOCK       := 32
-    KZG_COMMITMENT_INCLUSION_PROOF_DEPTH := 10
+    MAX_BLOB_COMMITMENTS_PER_BLOCK       := 4096
+    KZG_COMMITMENT_INCLUSION_PROOF_DEPTH := 17
     PENDING_PARTIAL_WITHDRAWALS_LIMIT    := 64
     PENDING_CONSOLIDATIONS_LIMIT         := 64
-    PTC_SIZE                             := 16
+    PTC_SIZE                             := 2
     MAX_PAYLOAD_ATTESTATIONS             := 4
     BUILDER_REGISTRY_LIMIT               := 1099511627776
     BUILDER_PENDING_WITHDRAWALS_LIMIT    := 1048576

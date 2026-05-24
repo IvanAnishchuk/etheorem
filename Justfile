@@ -255,13 +255,7 @@ official-ssz-vector-tests-static-full:
 # Alias for the mainnet sweep (kept for explicit-name call sites)
 official-ssz-vector-tests-static-mainnet: official-ssz-vector-tests-static-full
 
-# KNOWN-BROKEN today: the LeanEthCS schemas pin preset constants to
-# mainnet (most visibly `KZG_COMMITMENT_INCLUSION_PROOF_DEPTH = 10`
-# minimal vs `17` mainnet ⇒ a 224-byte schema mismatch on `BlobSidecar`
-# / `BeaconBlockBody` and post-Deneb derivatives — ~1599 failures).
-# Comes back online when LeanEthCS gets per-preset constants. Not a
-# SizzLean-library issue; tracked in LeanEthCS.
-# Full `ssz_static` sweep on minimal preset (KNOWN-BROKEN — see comment)
+# Full `ssz_static` sweep on minimal preset (38991 cases, Phase 0 → Fulu)
 official-ssz-vector-tests-static-minimal:
     .venv/bin/python scripts/run_conformance.py --suite static --config minimal --all
 
@@ -269,8 +263,8 @@ official-ssz-vector-tests-static-minimal:
 official-ssz-vector-tests-include PATTERN:
     .venv/bin/python scripts/run_conformance.py --include "{{PATTERN}}"
 
-# Everything from the upstream test corpus: full generic + full static on mainnet
-official-ssz-vector-tests-all: official-ssz-vector-tests-generic-full official-ssz-vector-tests-static-full
+# Everything from the upstream test corpus: full generic + full static on both presets
+official-ssz-vector-tests-all: official-ssz-vector-tests-generic-full official-ssz-vector-tests-static-full official-ssz-vector-tests-static-minimal
 
 
 # ─────────────────────────────────────────────────────────────────────────

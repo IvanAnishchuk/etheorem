@@ -177,24 +177,25 @@ uv pip install -r scripts/requirements.txt
 
 ### Current dispatch coverage
 
-The numbers below were last measured against consensus-spec-tests
-**v1.5.0**. With the pin now at **v1.6.0-beta.0**, a re-validation
-sweep needs to land before the counts can be quoted at the new
-tag; the LeanEthCS dispatch surface itself already covers the
-Fulu `proposer_lookahead` and the Gloas ePBS field set.
+Numbers below are against consensus-spec-tests **v1.6.0-beta.0**
+(the tag pinned in `scripts/run_conformance.py`). Both presets
+green across every fork Phase 0 → Fulu — Gloas and EIP-7805 test
+vectors exist in the corpus but aren't yet in the CLI dispatch
+table or the harness's `FORKS` list.
 
-- **`ssz_generic`**: **1865 / 1865 cases pass** across all handlers
-  (uints, basic_vector, bitvector, bitlist, boolean, containers).
-  The test-only structs (`SingleFieldTestStruct`, `SmallTestStruct`,
-  `FixedTestStruct`, `VarTestStruct`, `ComplexTestStruct`,
-  `BitsStruct`) have their SSZ shapes hardcoded in
-  `packages/LeanEthCS/LeanEthCS/Cli/Main.lean`.
-- **`ssz_static`** (`--suite static`): **38991 / 38991 cases pass**
-  at v1.5.0 on the minimal preset, every fork from Phase 0
-  through Fulu — including variable-size composites
-  (`Attestation`, `BeaconBlockBody`, `BeaconState`) and all fork
-  deltas (Altair / Bellatrix / Capella / Deneb / Electra / Fulu).
-  Mainnet preset validated at `--limit 2` (1641 / 1641); the full
-  mainnet `--all` sweep is available as a `workflow_dispatch`
-  button in CI. Gloas vectors land with the v1.6.0-beta.0 sweep;
-  EIP-7441 (Whisk) deferred per scope.
+- **`ssz_generic`**: **2188 / 2188 in-scope cases pass** across
+  all handlers (uints, basic_vector, bitvector, bitlist, boolean,
+  containers). 292 progressive-container cases are deliberately
+  out of scope. The test-only structs (`SingleFieldTestStruct`,
+  `SmallTestStruct`, `FixedTestStruct`, `VarTestStruct`,
+  `ComplexTestStruct`, `BitsStruct`) have their SSZ shapes
+  hardcoded in `packages/LeanEthCS/LeanEthCS/Cli/Main.lean`.
+- **`ssz_static --config mainnet --all`**: **1585 / 1585 cases
+  pass** across every fork Phase 0 → Fulu.
+- **`ssz_static --config minimal --all`**: **38991 / 38991 cases
+  pass** across every fork Phase 0 → Fulu — including
+  variable-size composites (`Attestation`, `BeaconBlockBody`,
+  `BeaconState`) and all fork deltas
+  (Altair / Bellatrix / Capella / Deneb / Electra / Fulu).
+- **One-command full sweep**: `just official-ssz-vector-tests-all`
+  drives generic + static-mainnet + static-minimal end-to-end.
