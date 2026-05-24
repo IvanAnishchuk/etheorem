@@ -20,12 +20,15 @@ theorems.
   runtime path and the verification path.
 
 - **Validated against Ethereum's test corpus.** Passes both
-  upstream SSZ suites from `ethereum/consensus-spec-tests`
-  end-to-end: `ssz_generic` (1865 / 1865 cases — the wire-format
-  tests) and `ssz_static` (38991 / 38991 cases on the minimal
-  preset, every fork from Phase 0 through Fulu — the per-fork
-  consensus-container tests). SHA-256 passes the NIST CAVP
-  vectors on every hasher the library ships.
+  upstream SSZ suites from `ethereum/consensus-spec-tests` (release
+  `v1.6.0-beta.0`) end-to-end on the mainnet preset:
+  `ssz_generic` (2188 / 2188 in-scope cases — the wire-format
+  tests; 292 progressive-container cases are deliberately out of
+  scope, see the "deliberately not implemented" table below) and
+  `ssz_static` (1585 / 1585 cases on mainnet preset, every fork
+  from Phase 0 through Fulu — the per-fork consensus-container
+  tests). SHA-256 passes the NIST CAVP vectors on every hasher
+  the library ships.
 
 - **Literate by default.** SizzLean sits at the intersection of
   two specialist worlds — SSZ and Lean 4 — and most readers only
@@ -68,12 +71,30 @@ container definitions (Phase0 → Gloas) live in the sibling
 
 **Experimental, conformance-validated.** Every SSZ type used by
 the Ethereum consensus spec from Phase 0 through Gloas is
-implemented. Both upstream test suites
-(`ethereum/consensus-spec-tests`) pass end-to-end:
-**1865 / 1865** `ssz_generic` cases and **38991 / 38991** `ssz_static`
-cases (minimal preset, every fork Phase 0 → Fulu). Mainnet preset
-validated at `--limit 2` (1641 / 1641); full mainnet `--all` sweep
-is a `workflow_dispatch` button in CI.
+implemented. Upstream test suites (`ethereum/consensus-spec-tests
+v1.6.0-beta.0`) pass clean on mainnet preset:
+
+* `ssz_generic --all` — **2188 / 2188** in-scope cases passed,
+  0 failed. Plus **292** deliberately skipped progressive-container
+  cases (see the "deliberately not implemented" table); the
+  conformance harness classifies them as `out of library scope`,
+  not failures.
+* `ssz_static --config mainnet --all` — **1585 / 1585** cases
+  passed across every fork Phase 0 → Fulu. Per-PR CI runs the
+  `--limit 1` smoke (634 / 634); the full sweep is the
+  `workflow_dispatch` button.
+
+The minimal-preset `ssz_static` sweep currently exposes a known
+LeanEthCS-side gap (sibling package, not SizzLean): the
+consensus-container schemas pin preset constants to mainnet, so
+types whose layout differs between presets (e.g.
+`KZG_COMMITMENT_INCLUSION_PROOF_DEPTH = 10` minimal vs `17`
+mainnet ⇒ a 224-byte schema mismatch on `BlobSidecar` /
+`BeaconBlockBody` and post-Deneb derivatives) re-serialise to the
+wrong width. Tracked in LeanEthCS; the SizzLean library itself
+is preset-agnostic and the failure is in the user-side schema
+declarations, not in `SSZType` / `serialize` / `deserialize` /
+`hashTreeRoot`.
 
 ### SSZ types implemented
 

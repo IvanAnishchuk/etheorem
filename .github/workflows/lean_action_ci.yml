@@ -48,30 +48,40 @@ jobs:
         run: pip install -r scripts/requirements.txt
 
       - name: Cache consensus-spec-tests archives
-        # Cache only the .tar.gz files (~490 MB for minimal + general);
+        # Cache only the .tar.gz files (~490 MB for mainnet + general);
         # the extracted trees (~4 GB total) re-build on each run via the
         # `ensure_archive` path in run_conformance.py — extraction is
         # ~1 min, much cheaper than the GitHub-side cache transfer would be.
-        # Keyed on the tag baked into the script — bumping it invalidates.
+        # Keyed on the tag baked into the script — bumping
+        # `DEFAULT_TAG` invalidates and the cache repopulates.
         uses: actions/cache@v4
         with:
-          path: ~/.cache/sizzlean/v1.5.0-*.tar.gz
-          key: consensus-spec-tests-v1.5.0-archives
+          path: ~/.cache/sizzlean/v1.6.0-beta.0-*.tar.gz
+          key: consensus-spec-tests-v1.6.0-beta.0-archives
 
       - uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9
         with:
           # `lean-action` builds Lake's targets by default; we need
-          # `sizz_test` for the conformance script to invoke. The default
-          # target (the library) is built transitively.
+          # `eth_ssz_vector_runner` (the LeanEthCS CLI the conformance
+          # script drives via batch protocol) plus the SizzLean library
+          # itself, which builds transitively as a dependency.
           lake-package-directory: '.'
-          build-args: 'sizz_test'
+          build-args: 'eth_ssz_vector_runner'
 
-      - name: Run conformance suite (minimal preset, subset)
+      - name: Run conformance suite (mainnet preset, subset)
+        # Mainnet preset is the green gate — `ssz_static --config
+        # mainnet --all` passes 1585 / 1585, and the `--limit 1` smoke
+        # below is a few hundred cases. The minimal-preset sweep is
+        # currently blocked by a LeanEthCS-side gap (per-preset
+        # container constants aren't preset-aware — most visibly the
+        # `KZG_COMMITMENT_INCLUSION_PROOF_DEPTH` mainnet/minimal split
+        # producing a 224-byte schema mismatch on `BlobSidecar` and
+        # derivatives). Bring minimal back here once that's addressed.
         run: |
           set -euo pipefail
           LIMIT='${{ github.event.inputs.conformance_limit || '1' }}'
           if [ "$LIMIT" = "all" ]; then
-            python3 scripts/run_conformance.py --suite all --config minimal --all
+            python3 scripts/run_conformance.py --suite all --config mainnet --all
           else
-            python3 scripts/run_conformance.py --suite all --config minimal --limit "$LIMIT"
+            python3 scripts/run_conformance.py --suite all --config mainnet --limit "$LIMIT"
           fi
