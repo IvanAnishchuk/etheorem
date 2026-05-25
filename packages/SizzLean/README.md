@@ -70,8 +70,8 @@ theorems.
 - **Trust assumptions you can grep for.** Every reliance on the
   C SHA-256 implementation is a named Lean `axiom` (or its
   `@[extern] opaque` FFI declaration) in `SizzLean/Hasher/`, and
-  shows up in any proof's trust footprint. The complete inventory
-  is recoverable with one grep:
+  shows up in the trust footprint of any proof that transitively
+  uses it. The complete inventory is recoverable with one grep:
 
   ```bash
   grep -rEn '^axiom |^@\[extern' packages/SizzLean --include='*.lean'
@@ -82,11 +82,13 @@ theorems.
   three `@[extern] opaque` FFI primitives (`sha256Hash`,
   `sha256Combine`, `sha256BatchCombine`) — six real declarations,
   all under `SizzLean/Hasher/`. The grep also surfaces a handful
-  of docstring mirrors (the same lines repeated inside a `/-- … -/`
-  block where the surrounding prose explains them); those are
-  intentional, not extra trust commitments. Each real declaration
-  is replaceable later by a `@[csimp]`-proved theorem without
-  touching a single dependent theorem statement.
+  of docstring mirrors (the same lines repeated inside a `/-! … -/`
+  module-docstring block where the surrounding prose explains
+  them); those are intentional, not extra trust commitments.
+  Each `@[extern]` declaration is replaceable later by a
+  `@[csimp]`-proved theorem; each equivalence `axiom` is
+  replaceable by a plain proved `theorem`. Either swap leaves
+  dependent theorem statements unchanged.
 
   *One additional trust class, auto-injected by tactics rather
   than hand-written.* The `decode_encode` and
@@ -97,6 +99,18 @@ theorems.
   `Lean.ofReduceBool`). Visible via `#print axioms
   SizzLean.Proofs.decode_encode`. `encode_size_le_max` is
   axiom-free over the standard kernel axioms.
+
+  *Out of central-theorem scope.* The cache layer
+  (`Cache/MerkleTree/`) carries its own local trust commitments —
+  `@[implemented_by]` on `zeroHashes` (substitutes a memoised
+  `unsafeBaseIO` reader for the kernel-visible recurrence;
+  equivalent by construction) and two `partial def`s
+  (`Node.rootOf`, `Node.commitAndHash`) — and test gates under
+  `SizzLeanTests/` use `native_decide` (one `Lean.ofReduceBool`
+  axiom per call). Neither enters the trust footprint of the
+  central theorems (`decode_encode` / `serialize_injective` /
+  `encode_size_le_max`), but a global audit of the library
+  should account for them too.
 
 - **Pluggable hash function.** Today it's SHA-256. Tomorrow it
   can be Poseidon2 — or whatever the Beam Chain redesign settles
