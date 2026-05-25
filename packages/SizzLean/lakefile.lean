@@ -93,6 +93,10 @@ unsafe def opensslCFlags : Array String :=
   runPkgConfig #["--cflags", "libcrypto"] #[]
 
 package SizzLean where
+  -- SPDX identifier; the LICENSE file lives at the umbrella root.
+  -- Reservoir requires a single-identifier SPDX expression.
+  license := "LGPL-3.0-only"
+  licenseFiles := #["../../LICENSE"]
   -- Discovered at lakefile-load time via `pkg-config --libs libcrypto`;
   -- see `opensslLinkArgs` above for the rationale and the fallback.
   moreLinkArgs := unsafe opensslLinkArgs
