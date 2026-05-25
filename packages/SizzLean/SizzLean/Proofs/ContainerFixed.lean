@@ -100,9 +100,9 @@ theorem deserializeFixedFields_append_shift
 /-- Field-list version of the size bound, taking the concrete
 value `vs` as a source of per-field inhabitants. -/
 theorem fixedByteSizeFields_le_maxByteLengthFields :
-    ∀ {fs : List SSZType} (h_fs : SSZType.BasicSupportedFieldsFixed fs)
-      (vs : SSZType.interpFields fs)
-      (h_max_field : ∀ t (_ : SSZType.BasicSupported t)
+    ∀ {fs : List SSZType} (_h_fs : SSZType.BasicSupportedFieldsFixed fs)
+      (_vs : SSZType.interpFields fs)
+      (_h_max_field : ∀ t (_ : SSZType.BasicSupported t)
         (_ : t.isFixedSize = true) (x : t.interp),
         (SSZType.serialize t x).size ≤ SSZType.maxByteLength t),
       SSZType.fixedByteSizeFields fs ≤ SSZType.maxByteLengthFields fs := by

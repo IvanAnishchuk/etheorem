@@ -284,6 +284,78 @@ is already constrained by the surrounding context (a typed
 parameter, a function return type), the annotation isn't
 needed.
 
+### Gating round-trips at build time
+
+A natural smoke test for an integration is to assert
+`deserialize (serialize x) = .ok x` at compile time via
+`native_decide`, so the build fails if the round-trip breaks:
+
+```lean
+-- ⚠️ This does NOT compile.
+example : SSZ.deserialize (SSZ.serialize myPair) = .ok myPair := by
+  native_decide
+```
+
+This fails to elaborate with `failed to synthesize Decidable (…
+= Except.ok …)`. The reason is that `SSZ.deserialize` returns
+`Except SSZError T`, and core Lean does not ship a
+`DecidableEq (Except ε α)` instance — even when `ε` and `α` are
+both `DecidableEq`, the equality on `Except` is not
+auto-derivable. So `native_decide` cannot find a `Decidable`
+instance for the goal.
+
+Three idioms work:
+
+1. **`SSZ.roundtrip` propositional proof** — closes the
+   equation as a proof term, not by computation, so no
+   `Decidable` instance is required. The shape is what
+   SizzLean's internal tests use
+   (`packages/SizzLean/SizzLeanTests/ReprExamples.lean`):
+
+   ```lean
+   example (p : Pair) : SSZ.deserialize (SSZ.serialize p) = .ok p :=
+     SSZ.roundtrip
+       (.containerFixed (.cons .uintN64 rfl (.cons .uintN32 rfl .nil))) p
+   ```
+
+   The trade-off: you supply the `BasicSupported`-shape witness
+   by hand (the `.containerFixed …` term). For ad-hoc smoke
+   tests, this is more typing than most users want.
+
+2. **`Bool`-shaped predicate** — convert the round-trip to a
+   computation that returns `Bool`, then gate on `= true`. `Bool`
+   equality is trivially `Decidable`, so `native_decide` evaluates
+   the whole thing at build time:
+
+   ```lean
+   def roundTripsOk : Bool :=
+     match SSZ.deserialize (T := Pair) (SSZ.serialize myPair) with
+     | .ok p    => p.a == myPair.a && p.b == myPair.b
+     | .error _ => false
+
+   example : roundTripsOk = true := by native_decide
+   ```
+
+   Concise, no `BasicSupported` witness needed. The check is
+   structural-equal on each field — if you add a field later
+   you need to extend the comparison.
+
+3. **Trust the library's own gates** — `lake build SizzLeanTests`
+   runs `SSZ.roundtrip` over every `BasicSupported` shape on the
+   built-in types and the example containers in `ReprExamples.lean`.
+   The three central theorems
+   (`SSZ.decode_encode` / `SSZ.serialize_injective` /
+   `SSZ.encode_size_le_max`) are proved universally over
+   `SSZType.BasicSupported`, so the round-trip property is
+   already a theorem of the library for every container whose
+   shape sits in `BasicSupported` — no per-container assertion
+   needed in your downstream code unless you want the build to
+   break on your specific container's wire layout.
+
+Prefer (2) for one-off smoke tests; (1) when you want a real
+theorem statement in your downstream code; (3) when you don't
+need a per-container assertion at all.
+
 ## Proving things about your spec
 
 Four standard idioms cover almost every goal you'll write that

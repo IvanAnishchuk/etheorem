@@ -100,7 +100,7 @@ theorem decode_encode : ∀ {s : SSZType}, SSZType.BasicSupported s →
 /-- Field-walker companion: induct on `h_fs` and dispatch
 per-cons-head to `decode_encode`. -/
 theorem decode_encode_containerFixed_aux : ∀ {fs : List SSZType}
-    (h_fs : SSZType.BasicSupportedFieldsFixed fs)
+    (_h_fs : SSZType.BasicSupportedFieldsFixed fs)
     (vs : SSZType.interpFields fs) (varOff : Nat),
     SSZType.deserializeFixedFields fs
         (SSZType.serializeFieldsAux fs vs varOff).1 0 =
