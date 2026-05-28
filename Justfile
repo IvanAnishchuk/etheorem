@@ -292,6 +292,18 @@ gen-cli-dispatch:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Releases
+# ─────────────────────────────────────────────────────────────────────────
+
+# Bump LeanSha256's patch (Z) version, commit, and create the release tag.
+# Does not push — prints the exact `git push` commands at the end. The
+# mirror workflow translates the tag to `vX.Y.Z` on the downstream repo.
+# Stdlib-only Python; no .venv needed.
+bump-leansha256-patch:
+    python3 packages/LeanSha256/scripts/bump_patch.py
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Python venv (one-time setup, required for official-vector-test recipes)
 # ─────────────────────────────────────────────────────────────────────────
 
