@@ -45,7 +45,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout umbrella (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # `git subtree split` walks the whole history; a shallow
           # clone produces a truncated downstream history.
@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
 
       - name: Load deploy key for etheorem/LeanSha256
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.LEANSHA256_DEPLOY_KEY }}
 
