@@ -136,15 +136,12 @@ example :
 `default NonZeroElem = { a := 1, b := 1 }`. The view-side `set! 6 v`
 is an OOB no-op so the view stays at length 3 with original values.
 
-This case is the regression guard for the `PendingWrite T =
-T → Option Node` design: under the earlier `T → Node` shape, the
-closure for `vals[6]` projected `view.vals[6]! = default NonZeroElem
-= { a := 1, b := 1 }`, built `Node.ofShape` of that non-zero
-element, and wrote it into the tree at position 6 — diverging
-from `SSZ.hashTreeRoot view`, which correctly zero-pads. The
-current closure returns `none` when the view-side `set!` was an
-OOB no-op, so the pending entry is dropped and the cached root
-matches the spec root regardless of `default α`. -/
+This case exercises the `PendingWrite T = T → Option Node`
+contract: a closure built for an OOB write must return `none` so
+the pending entry is dropped rather than projecting `default α`
+into the tree at the bare index. The view-side `set!` is itself
+an OOB no-op, so the cached root must match `SSZ.hashTreeRoot
+view`'s zero-padding regardless of what `default α` produces. -/
 private def nzInitial : SSZList NonZeroElem 8 :=
   ⟨#[{ a := 10, b := 20 },
      { a := 11, b := 21 },

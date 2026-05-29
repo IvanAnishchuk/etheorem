@@ -596,10 +596,10 @@ example : roundTripUInt32 42 = true := by native_decide
 /-- Round-trip `.vector .bool 3` with `#v[true, false, true]`. -/
 example : roundTripVecBool3 #v[true, false, true] = true := by native_decide
 
-/-! ### Round-trip examples for Sub-phase 3.1 — new paths
+/-! ### Round-trip examples for the wide-integer and variable-size paths
 
-The new arms (`uintN 128 / 256`, variable-size containers,
-variable-size element lists) each get a closed-form `native_decide`
+The `uintN 128 / 256` integer arms, variable-size containers, and
+variable-size element lists each get a closed-form `native_decide`
 round-trip. A bug in the corresponding encoder/decoder would
 surface here at build time. -/
 

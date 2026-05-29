@@ -11,13 +11,11 @@ import SizzLeanTests.PendingPrefixConflict
 import SizzLeanTests.PendingListShrink
 import SizzLeanTests.WidthsAndLists
 import SizzLeanTests.Sha256BatchEquivalence
--- Hash-consing (Stage 17c) is deferred — its smart constructor is
--- not yet integrated into `Node.ofShape` / `setAt` /
+-- `HashConsCoherence` gates the standalone hash-cons primitive; it
+-- is kept on disk but not in the default test build because the
+-- smart constructor is not wired into `Node.ofShape` / `setAt` /
 -- `merkleRootWithCache`, so the user-facing `SSZ.FastBox` /
--- `TreeBacked` path doesn't benefit transparently. The
--- `HashConsCoherence` test gates the standalone primitive and is
--- kept on disk but not in the default test build until the
--- library-side integration lands.
+-- `TreeBacked` path doesn't exercise it.
 import SizzLeanTests.SerializeCacheCoherence
 
 /-!

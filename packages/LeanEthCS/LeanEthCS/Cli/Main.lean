@@ -49,11 +49,10 @@ import LeanEthCS.Forks.Fulu.Inherited
 /-!
 # `LeanEthCS.Cli.Main` — `eth_ssz_vector_runner` driver binary
 
-PLAN.md Stage 9d / Phase 3 CLI. Pure-Lean driver that the Python
-`scripts/run_conformance.py` orchestrator invokes per test case.
-Lives under `Tests` because its single purpose is to
-be driven by the conformance harness — nothing in the library
-proper depends on it.
+Pure-Lean driver that the Python `scripts/run_conformance.py`
+orchestrator invokes per test case. Its single purpose is to be
+driven by the conformance harness — nothing in the library proper
+depends on it.
 Argv contract:
 
 ```
@@ -76,18 +75,13 @@ known Lean types. Adding a new consensus type means one more arm in
 SSZRepr metadata at runtime, which conflicts with the kernel-opaque
 treatment of `Hasher` and would complicate the trust boundary.
 
-## What types are currently dispatched
+## What types are dispatched
 
-* `phase0:BeaconBlockHeader` — the canonical first test case.
-* `phase0:Validator` — single validator entry.
-* `phase0:Fork`, `Checkpoint`, `Eth1Data`, `AttestationData`,
-  `SignedBeaconBlockHeader`, `ProposerSlashing`, `DepositMessage`,
-  `DepositData`, `VoluntaryExit`, `SignedVoluntaryExit`.
-
-Variable-size containers (`Attestation`, `BeaconBlockBody`,
-`BeaconState`, etc.) require fields whose SSZRepr instances aren't
-yet shipped — they'll land as Sub-phase 3.3 widens, and the CLI
-dispatch gains one arm per type.
+The dispatcher in `runRoot` / `runCheck` enumerates the Phase 0
+through Fulu containers exposed by `LeanEthCS.Forks.*`. Adding a
+new consensus type means one more arm under the appropriate fork
+and, for preset-sensitive types (`BeaconState`, `BeaconBlockBody`,
+…), a sub-match on `Preset.Minimal` / `Preset.Mainnet`.
 
 ## Hex helpers
 
@@ -1373,7 +1367,7 @@ layout):
 `containers` tests use named test-only structures
 (`SingleFieldTestStruct`, `VarTestStruct`, …); those are not parsed
 here — they'd require defining the test container types as Lean
-structures with `deriving SSZRepr`. Deferred. -/
+structures with `deriving SSZRepr`, and the CLI does not. -/
 
 /-- Parse a uintN element identifier (`uint8`, `uint16`, …). -/
 private def parseUintElem (s : String) : Option SSZType :=
@@ -1662,10 +1656,10 @@ def main (args : List String) : IO UInt32 := do
 
 end LeanEthCS.Cli
 
-/-- Top-level entry point. `lake env lean --run
-Tests/Cli/Main.lean -- <args>` invokes this. Also
-wired through `lakefile.lean`'s `lean_exe eth_ssz_vector_runner` when the
-linker cooperates (Lean's bundled startup files reference glibc
-symbols removed in glibc 2.34+; on those systems the `--run` path
-is the working route). -/
+/-- Top-level entry point. `lake exe eth_ssz_vector_runner --
+<args>` invokes this through the `lean_exe` declaration in
+`lakefile.toml`. On systems where Lean's bundled startup files
+cannot link against glibc 2.34+ (which removes a few symbols the
+startup objects reference), `lake env lean --run
+LeanEthCS/Cli/Main.lean -- <args>` is the alternative route. -/
 def main : List String → IO UInt32 := LeanEthCS.Cli.main

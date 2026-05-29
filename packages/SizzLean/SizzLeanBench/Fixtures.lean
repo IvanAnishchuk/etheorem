@@ -29,11 +29,10 @@ nodes.
 ## `ValidatorSet256` *(large)*
 
 Wraps a `Vector ValidatorShape 256` — 256 nested containers,
-~36 KB serialised, depth 12. The intermediate-scale fixture —
-where the cache's spine-walking advantage starts to dominate
-and where the planned SIMD batched SHA-256 path will become
-visible (each cold root pays ~4 K pair hashes; AVX-512 fills
-its 16-pipe lane on this size).
+~36 KB serialised, depth 12. The intermediate-scale fixture
+where the cache's spine-walking advantage starts to dominate;
+each cold root pays ~4 K pair hashes, large enough for any
+SIMD-batched SHA-256 path to amortise its overhead.
 
 ## `ValidatorSet4096` *(huge)*
 
@@ -91,8 +90,8 @@ deriving Inhabited, SSZRepr
 /-- 4096-validator vector — depth-16 SSZ tree, ~580 KB
 serialised. The "huge" tier; used in the deepest cold-root
 row to verify scaling. Cold root pays ~65 K pair hashes — the
-fixture where the planned AVX-512 lane-fill SIMD batched SHA-256
-will have the most amortised work to act on. -/
+fixture with the largest amortised batch on which a SIMD
+SHA-256 path could act. -/
 structure ValidatorSet4096 where
   validators : Vector ValidatorShape 4096
 deriving Inhabited, SSZRepr

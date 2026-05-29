@@ -109,7 +109,8 @@ coordinates them via `[[require]]` blocks.
 .
 ├── lakefile.toml                # Umbrella (TOML, declarative)
 ├── lean-toolchain               # Pinned toolchain; CI reads this. Bump deliberately.
-├── README.md / CLAUDE.md / monorepo-arch.md  # Repo-wide docs
+├── README.md / CLAUDE.md       # Repo-wide overview + conventions
+├── docs/                       # Repo-wide design docs (monorepo-arch.md)
 ├── scripts/                     # Python harnesses (run_conformance.py, …)
 ├── packages/
 │   ├── LeanSha256/              # Pure-Lean SHA-256 reference; no FFI.
@@ -139,7 +140,7 @@ typeclass + deriving handler, cached Merkle tree, FFI SHA-256,
 trust boundary, the per-subpackage layout under `packages/`),
 [`PLAN.md`](packages/SizzLean/docs/PLAN.md) sequences SizzLean's
 work into stages with concrete deliverables and acceptance
-criteria. [`monorepo-arch.md`](monorepo-arch.md) at the repo root
+criteria. [`docs/monorepo-arch.md`](docs/monorepo-arch.md)
 documents how the monorepo's three-subpackage shape works.
 This file (CLAUDE.md) is binding on style, conventions, and
 discipline across all subpackages; when those overlap with

@@ -11,7 +11,7 @@ import Lake
 open Lake DSL System
 
 /-- Auto-discover lib contents one directory level deep. See the
-umbrella's `monorepo-arch.md` for the layout context. -/
+umbrella's `docs/monorepo-arch.md` for the layout context. -/
 unsafe def globsUnder
     (srcDir : System.FilePath) (rootName : Lean.Name)
     (exclude : Array String := #[]) : Array Glob :=
@@ -136,9 +136,9 @@ target sha256_shim.o pkg : FilePath := do
   let leanInclude ← getLeanIncludeDir
   buildO obj (← inputTextFile src) (cShimFlags leanInclude) #[] "cc" getLeanTrace
 
--- Stage 17b: batched SHA-256 sibling combine. Same compilation
--- shape as `sha256_shim.o`; the two `.o` files are linked into one
--- static lib (below).
+-- Batched SHA-256 sibling combine. Same compilation shape as
+-- `sha256_shim.o`; the two `.o` files are linked into one static
+-- lib (below).
 target sha256_batch.o pkg : FilePath := do
   let src := pkg.dir / "csrc" / "sha256_batch.c"
   let obj := pkg.buildDir / "csrc" / "sha256_batch.o"
@@ -168,8 +168,8 @@ lean_lib SizzLeanTests where
 -- Microbenchmarks live in a third sibling lib, `SizzLeanBench`.
 -- Built via `lake build SizzLeanBench`; run via `lake exe ssz_bench`
 -- (the `just bench` recipe wraps the redirection to a TSV file).
--- Each Stage 17 sub-stage's measurement column lives in its own
--- `SizzLeanBench/<Name>.lean` file with a `runAll : IO Unit`.
+-- Each scenario's measurement column lives in its own
+-- `SizzLeanBench/Scenarios/<Name>.lean` file.
 --
 -- `precompileModules := true` is load-bearing for the bench: without
 -- it, the scenario for-loops and the `runBench` driver run as

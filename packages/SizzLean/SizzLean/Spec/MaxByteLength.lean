@@ -30,22 +30,11 @@ in a `mutual` block — same shape as `Spec/Serialize.lean`'s
   fields contribute their own `maxByteLength`. Variable-size fields
   contribute `BYTES_PER_LENGTH_OFFSET + maxByteLength` (one
   `uint32` offset plus the field's body upper bound).
-* **`union fs`**: 1 selector byte + the maximum over all variants'
-  `maxByteLength`.
-
-## Deferred (return `0`, guarded by `SupportedBounded`)
-
-* `progContainer`, `stableContainer`, `compatUnion` — EIP cases not
-  yet implemented in `Spec/Serialize.lean`.
-* `progList _`, `progBitlist` — uncapped types have no finite static
-  bound by construction. `SupportedBounded` (in `Spec/Supported.lean`)
-  excludes them, so `encode_size_le_max`'s hypothesis rules out the
-  cases where the `0` placeholder would matter.
 
 ## Lean idioms used here
 
-* `mutual ... end` — needed because the `container` / `union`
-  recursions descend into a `List SSZType`, and Lean 4.29.1's
+* `mutual ... end` — needed because the `container` recursion
+  descends into a `List SSZType`, and Lean 4.29.1's
   structural-recursion checker rejects higher-order recursion
   through `List.foldr`. Same workaround `Spec/Interp.lean` /
   `Spec/Serialize.lean` use; see `Spec/Interp.lean`'s docstring

@@ -81,6 +81,29 @@ read). After a single field mutation, `merkleRootWithCache` walks
 only the dirty spine — O(depth) hashes — because every off-path
 `pair` still carries its cached root.
 
+## Lean idioms used here (annotated on first appearance)
+
+* `Thunk α` (Lean core) — a one-shot lazy value. `Thunk.mk
+  (fun _ => e)` wraps `e` unevaluated; the first `Thunk.get`
+  forces it, the result is memoised on the heap, and every
+  subsequent access returns the cached result. Used below to
+  defer the initial `Node.ofShape` build until the first root
+  read, so a `TreeBacked` that's only inspected on the `view`
+  side never pays for tree construction.
+* `Std.TreeMap k v` (from `Std.Data.TreeMap`) — a sorted-key
+  immutable map backed by a balanced tree; `insert` and
+  iteration in key order are both O(log n). Used as the
+  `pending` accumulator below, keyed by gindex so the
+  `setManyAt` walk receives writes in ascending tree position.
+* `@[specialize]` (used on hot helpers further down) — tells the
+  compiler to monomorphise this function for each concrete type
+  it is applied to at call sites. The polymorphic-Lean fallback
+  reads the typeclass dictionary at runtime; the specialised
+  copy inlines it, removing the dispatch.
+* `abbrev` — a reducible `def` that the elaborator unfolds
+  transparently during typeclass synthesis and dot notation.
+  Used for the user-facing alias `CachedSSZ` below.
+
 ## Pending-overlay — deferred tree-side writes
 
 Each `TreeBacked` carries a third field — `pending : Std.TreeMap
@@ -370,7 +393,7 @@ abbrev when looking up `CachedSSZ.ofValue` — you'd land in
 two short aliases below restore the symmetry with
 `UncachedSSZ.ofValue` / `UncachedSSZ.hashTreeRoot` so one-flavour
 user code never has to mention `TreeBacked` (the internal name)
-or the legacy `hashTreeRootCached` suffix. -/
+or the `hashTreeRootCached` suffix. -/
 
 namespace CachedSSZ
 

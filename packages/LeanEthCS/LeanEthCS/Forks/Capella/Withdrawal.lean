@@ -4,9 +4,8 @@ import SizzLean.Repr.Deriving
 /-!
 # `LeanEthCS.Forks.Capella.Withdrawal` — Capella withdrawal types
 
-PLAN.md Sub-phase 3.4 (Capella) — Capella enables validator
-withdrawals from the beacon chain to the execution layer. Three
-new fixed-size containers carry the data:
+Capella enables validator withdrawals from the beacon chain to the
+execution layer. Three new fixed-size containers carry the data:
 
 * `Withdrawal`               — a single withdrawal entry.
 * `BLSToExecutionChange`     — a one-time message a validator

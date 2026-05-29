@@ -70,10 +70,10 @@ structure Preset where
   -- (2 minimal / 512 mainnet); the others agree across presets but
   -- stay as preset-record fields for macro uniformity.
   -- `BUILDER_REGISTRY_LIMIT` and `MAX_BUILDERS_PER_WITHDRAWALS_SWEEP`
-  -- aren't part of the upstream Gloas spec but are referenced by the
-  -- current LeanEthCS Gloas schema (which still carries a `builders`
-  -- list); the Gloas surface is not yet in the CLI dispatch table,
-  -- so these values don't affect the conformance sweep.
+  -- aren't part of the upstream Gloas spec; they are referenced by
+  -- the LeanEthCS Gloas schema's `builders` list. The Gloas surface
+  -- is outside the CLI dispatch table, so these values do not
+  -- affect the conformance sweep.
   PTC_SIZE                            : Nat
   MAX_PAYLOAD_ATTESTATIONS            : Nat
   BUILDER_REGISTRY_LIMIT              : Nat

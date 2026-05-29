@@ -35,11 +35,10 @@ construction differs. After construction, the user writes
 | **cached** | `SSZ.FastBox v` | Every transparent optimisation (pending overlay, root Thunk memo, bytes Thunk memo, `@[specialize]`) fires automatically. |
 
 There is no "Cached + Batch" or "Cached + Consing" column.
-Both of those ship as *library primitives* (`sha256BatchCombine`,
+Both ship as *library primitives* (`sha256BatchCombine`,
 `Node.mkPair`) but are not invoked from `merkleRootWithCache`'s
-recursive walk or from `Node.ofShape` / `setAt` — i.e. they are
-*not* on the user's normal interface. Until they are, they
-count as in-flight Stage 17b/c work and stay out of the bench.
+recursive walk or from `Node.ofShape` / `setAt` — they are not
+on the user's normal interface, so they stay out of the bench.
 
 ## Three fixtures
 
@@ -57,12 +56,10 @@ operation pays for hundreds of pair-hashes.
 ## Six scenarios — all reflecting realistic workloads
 
 Each scenario is an operation sequence that maps to a real
-consensus-client pattern. Earlier revisions of the bench had
-twelve scenarios; six were dropped (S2 / S3 / S5 / S8 / S9 /
-S11) because they measured artificial shapes (repeated reads
-of an unchanged root, write-root-write-root cycles, repeated
-serialisation of the same bytes) that don't appear in
-production consensus code. What remains:
+consensus-client pattern. Artificial shapes (repeated reads of an
+unchanged root, write-root-write-root cycles, repeated serialisation
+of the same bytes) are excluded — they don't appear in production
+consensus code, so measuring them would mislead. The six retained:
 
 ### Small tier (S1–S3 — quick measurements, ~1 s wall-clock)
 

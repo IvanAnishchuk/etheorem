@@ -22,24 +22,40 @@ theorem. Per-arm proofs live in sibling modules:
 | `.vectorFixed t n` | `Proofs/VectorFixed.lean` |
 | `.listFixed t cap` | `Proofs/ListFixed.lean` |
 
+## A short note on Lean's recursion checker
+
+Recursive definitions in Lean must be proved to terminate. The
+*structural-recursion checker* is the cheap path: it accepts a
+recursive call `f arg` if `arg` is a **strict subterm** of the
+caller's input — i.e. extracted by pattern matching, so the
+inductive's definition makes it syntactically smaller. The other
+path is well-founded recursion, where the programmer supplies a
+measure and a proof that it decreases; it's strictly more
+powerful but needs an explicit `termination_by`/`decreasing_by`.
+
+The proofs here use the structural path, which constrains *how*
+recursive calls are written.
+
 ## The mutual `decode_encode` / `decode_encode_containerFixed_aux`
 
 For composite arms (`vectorFixed`, `listFixed`), `decode_encode`
 hands the per-arm helper a closure
-`fun y => decode_encode h_t y` — Lean's structural-recursion
-checker accepts this because the closure body's argument `h_t`
-is bound to the case-split's sub-witness (a strict subterm of
-`h_sup`).
+`fun y => decode_encode h_t y`. The checker accepts this because
+`h_t` is the case-split's sub-witness — a *strict subterm* of the
+outer `h_sup`, extracted by the `BasicSupported.vectorFixed`
+pattern — so each recursive call descends.
 
 For the `containerFixed` arm, the helper would need
 `∀ t ∈ fs, decode_encode_t` — but a closure abstracting `t`
-loses the connection to `fs`, and the checker can't verify
-well-foundedness. The fix is a **mutual block** with a partner
-function `decode_encode_containerFixed_aux` that recurses on
+loses the connection to `fs`, and the checker can't see the
+descent. The fix is a **mutual block** with a partner function
+`decode_encode_containerFixed_aux` that recurses on
 `h_fs : BasicSupportedFieldsFixed` structurally and dispatches
-to `decode_encode` per-cons-head — Lean sees both descents as
-strict-subterm descents within the mutual inductive pair
-`(BasicSupported, BasicSupportedFieldsFixed)`.
+to `decode_encode` per-cons-head. Within a mutual block, members
+can call each other freely so long as every call descends on a
+strict subterm of *some* mutually-defined input; here the descent
+zig-zags between the inductive pair `(BasicSupported,
+BasicSupportedFieldsFixed)`.
 
 `Proofs/ContainerFixed.lean` still ships the substantive
 helpers (`deserializeFixedFields_append_shift`,

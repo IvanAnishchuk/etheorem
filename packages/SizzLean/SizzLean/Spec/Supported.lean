@@ -7,21 +7,13 @@ import SizzLean.Spec.Serialize
 The three central theorems (`decode_encode`,
 `serialize_injective`, `encode_size_le_max`) are stated
 *universally over `SSZType`*, but `Spec/Serialize.lean` and
-`Spec/Deserialize.lean` deliberately stub several constructors
-with `TODO` markers. For those constructors the theorems are not
-just unproved but actually false (encode returns `.empty`, decode
-returns `.error`, so roundtrip cannot hold).
+`Spec/Deserialize.lean` cover only a subset of the `SSZType`
+universe. For constructors outside that subset the theorems are
+not just unproved but actually false (encode returns `.empty`,
+decode returns `.error`, so roundtrip cannot hold).
 
-The fix is to guard each theorem with a `Supported s` hypothesis
+Each theorem is therefore guarded by a `Supported s` hypothesis
 that names exactly the constructors with real implementations.
-Closing a deferred Spec case in the future becomes a two-step task:
-
-1. Implement the Spec arm (encode + decode + maybe hashTreeRoot).
-2. Add a constructor to `Supported` and discharge the existing
-   proof obligation.
-
-This is honest scope and unblocks proof work without paper-overing
-the gap.
 
 ## Why three predicates, not one
 
@@ -30,13 +22,10 @@ the gap.
   because roundtrip and injectivity make sense for them — they have
   no static *size* bound but the encode/decode pair still inverts
   cleanly.
-* `SupportedAll` — pointwise `Supported` over a `List SSZType`.
-  Needed by the `union` case: every variant must be supported.
 * `SupportedFieldsFixed` — pointwise `Supported ∧ isFixedSize` over
-  a `List SSZType`. Needed by the `container` case: our decoder
-  currently only handles all-fixed-size field lists; mixed/variable
-  fields are deferred (see `TODO(stage-3-deferral)` in
-  `Spec/Deserialize.lean` at the `.container` arm).
+  a `List SSZType`. Needed by the `container` case: the decoder
+  handles all-fixed-size field lists; mixed/variable field lists
+  fall through to `.error`.
 * `SupportedBounded` — strict subset of `Supported` that *excludes*
   uncapped types (`progBitlist`, `progList`). Used only by
   `encode_size_le_max` in `Proofs/SizeBound.lean`, where uncapped
@@ -52,7 +41,7 @@ take it as a *hypothesis* and case-split: each constructor of the
 `Supported` inductive carries its sub-witnesses directly, while a
 `Bool` would need `simp [isSupported]` + `cases s` to extract the
 same information. The `Prop` form keeps induction hypotheses clean.
-`DecidableEq SSZType` is also currently absent (see the TODO in
+`DecidableEq SSZType` is also absent (see the note in
 `Spec/Type.lean`), which would block lifting a `Bool` predicate to
 `Decidable Supported` automatically.
 -/
@@ -64,9 +53,8 @@ namespace SizzLean.Spec
 mutual
 /-- The implemented constructors and their structural support
 witnesses. Each constructor of this inductive corresponds to a
-constructor of `SSZType` that has a real (non-deferred) `serialize`
-and `deserialize` implementation; the field list mirrors the
-`TODO(stage-3-deferral)`-free arms of `Spec/Serialize.lean` and
+constructor of `SSZType` that has a real `serialize` and
+`deserialize` implementation in `Spec/Serialize.lean` and
 `Spec/Deserialize.lean`. -/
 inductive SSZType.Supported : SSZType → Prop
   | uintN8         : SSZType.Supported (.uintN 8)
@@ -76,15 +64,13 @@ inductive SSZType.Supported : SSZType → Prop
   | bool           : SSZType.Supported .bool
   | bitvector      : ∀ {n : Nat}, SSZType.Supported (.bitvector n)
   | bitlist        : ∀ {cap : Nat}, SSZType.Supported (.bitlist cap)
-  /-- `vector` decode currently handles only fixed-size element
-  types (the variable-size offset-table read is
-  `TODO(stage-3-deferral)` in `Spec/Deserialize.lean`). The
+  /-- `vector` decode handles only fixed-size element types; the
+  variable-size offset-table read is not implemented. The
   `isFixedSize = true` witness mirrors `listFixed`. -/
   | vectorFixed    : ∀ {t : SSZType} {n : Nat},
                      SSZType.Supported t → t.isFixedSize = true →
                      SSZType.Supported (.vector t n)
-  /-- `list` decode is only implemented for fixed-size element
-  types (the variable-size offset-table read is `TODO(stage-3-deferral)`).
+  /-- `list` decode is implemented for fixed-size element types.
   The `isFixedSize = true` witness on `t` is what makes the
   Roundtrip proof discharge for this arm. -/
   | listFixed      : ∀ {t : SSZType} {cap : Nat},
@@ -109,18 +95,15 @@ inductive SSZType.SupportedFieldsFixed : List SSZType → Prop
 end
 
 mutual
-/-- Strict subset of `Supported`. With the unused SSZ forms removed
-(unions, progressive / stable containers, progressive lists,
-compatible unions — see `Spec/Type.lean`), every `Supported` shape
-also has a finite static size bound. `SupportedBounded` is currently
-*equal* to `Supported` extensionally; we keep the two predicates
-distinct because `encode_size_le_max` proofs phrase their hypothesis
-as "bounded", and the indirection costs nothing.
-
-(If a future uncapped form is re-introduced — e.g. `progressiveList`
-when EIP-7916 enters real scope — its constructor would be added to
-`Supported` but *not* to `SupportedBounded`, and the two predicates
-would diverge again.) -/
+/-- Strict subset of `Supported`. Every `Supported` shape in the
+current `SSZType` universe also has a finite static size bound, so
+`SupportedBounded` is extensionally equal to `Supported`; the two
+predicates are kept distinct because `encode_size_le_max` proofs
+phrase their hypothesis as "bounded", and the indirection costs
+nothing. The split also leaves room: any uncapped form (e.g. a
+`progressiveList` arm for EIP-7916) would add a constructor to
+`Supported` but not to `SupportedBounded`, so the predicates would
+diverge without renaming the existing theorems. -/
 inductive SSZType.SupportedBounded : SSZType → Prop
   | uintN8         : SSZType.SupportedBounded (.uintN 8)
   | uintN16        : SSZType.SupportedBounded (.uintN 16)

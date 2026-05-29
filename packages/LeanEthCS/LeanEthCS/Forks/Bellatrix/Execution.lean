@@ -4,9 +4,9 @@ import SizzLean.Repr.Deriving
 /-!
 # `LeanEthCS.Forks.Bellatrix.Execution` — execution-layer containers
 
-PLAN.md Sub-phase 3.4 (Bellatrix) — Bellatrix is the merge fork
-that fuses the beacon chain with an execution-layer block. This
-file declares the three execution-layer containers:
+Bellatrix is the merge fork that fuses the beacon chain with an
+execution-layer block. This file declares the three execution-layer
+containers:
 
 * `ExecutionPayload`     — full payload with the transaction list.
 * `ExecutionPayloadHeader` — same shape *minus* `transactions`,

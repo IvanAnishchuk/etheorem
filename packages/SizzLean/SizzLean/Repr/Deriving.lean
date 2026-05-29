@@ -20,15 +20,33 @@ instance (so the field type must itself derive — or carry — an
 `SSZRepr` instance), assembles the matching `SSZType.container`
 shape, and emits the iso plus `rfl` proofs.
 
+## What a deriving handler is
+
+Lean's `deriving Cls` after a declaration asks the compiler to
+synthesise a `Cls` instance automatically. The compiler looks up
+a *deriving handler* for `Cls` — a function registered ahead of
+time that takes the just-elaborated type's name and returns the
+elaborated `instance` declaration. For `Repr`, `DecidableEq`,
+etc., the handlers ship with Lean core; for user-defined
+classes like `SSZRepr` the handler ships with the class. This
+file is that handler.
+
+The handler runs at *elaboration* time (after parsing, before
+typechecking the generated code), using Lean's metaprogramming
+API (`MetaM`, `TermElabM`, `CommandElabM`). It produces a
+`Syntax` tree that is then re-fed through normal elaboration —
+so anything the handler emits is typechecked exactly as if a
+user had written it by hand.
+
 ## Implementation strategy
 
 This is the only metaprogramming in the project. ARCHITECTURE.md §5.2
 names Lean core's `src/Lean/Elab/Deriving/Repr.lean` and
-`src/Lean/Elab/Deriving/FromToJson.lean` as templates; we take a
-lighter-weight path because (a) we only ever handle *structures*
-(not general inductives), and (b) we have no need for the
-`mutual`-block generation those templates produce. The handler
-emits exactly one `instance` command per derived type.
+`src/Lean/Elab/Deriving/FromToJson.lean` as templates; the path
+here is lighter-weight because (a) only *structures* are
+handled (not general inductives), and (b) no `mutual`-block
+generation is needed. The handler emits exactly one `instance`
+command per derived type.
 
 The emitted instance has the following shape, where `Foo` has
 fields `a₁ : T₁, ..., aₙ : Tₙ`:

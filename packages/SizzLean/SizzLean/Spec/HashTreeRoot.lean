@@ -33,22 +33,19 @@ through either one.
   `Cache/MerkleTree/Zero.lean` produces concrete bytes once a
   `Hasher` instance exists.
 * *mix-in length* — for variable-length collections (`list`,
-  `bitlist`, `progList`, `progBitlist`) the body root is combined
-  with a `uint64`-LE encoding of the *actual* element/bit count
-  right-padded to a chunk: `combine bodyRoot (uint64ToChunk n)`.
-* *mix-in selector* — for `union` the variant root is combined with
-  a `uint64`-LE encoding of the wire selector index, same chunk
-  encoding as length mix-in.
+  `bitlist`) the body root is combined with a `uint64`-LE encoding
+  of the *actual* element/bit count right-padded to a chunk:
+  `combine bodyRoot (uint64ToChunk n)`.
 
 ## Why a `mutual` block (annotated where first relevant elsewhere)
 
 Same shape `Spec/Interp.lean` and `Spec/Serialize.lean` already use:
-the recursion descends into `List SSZType` (container fields,
-union variants), and Lean 4.29.1's structural-recursion checker
-rejects passing `hashTreeRoot` itself as a higher-order argument to
-`List.map`. The fix is to inline each list traversal as a
-mutually-recursive helper that consumes its list cons-by-cons. See
-`Spec/Interp.lean`'s preamble for the long-form explanation.
+the recursion descends into `List SSZType` (container fields), and
+Lean 4.29.1's structural-recursion checker rejects passing
+`hashTreeRoot` itself as a higher-order argument to `List.map`. The
+fix is to inline each list traversal as a mutually-recursive helper
+that consumes its list cons-by-cons. See `Spec/Interp.lean`'s
+preamble for the long-form explanation.
 
 ## `interp`-reduction quirk
 
@@ -57,22 +54,14 @@ arm whose body uses the value `x : s.interp` may need a local
 `let x' : ConcreteType := x` to force `s.interp`'s reduction at the
 arm before further unfolding. The same idiom appears below.
 
-## Deferred arms
+## `uintN` width coverage
 
-A handful of arms are stubbed out, each tagged `TODO` inline:
-
-* `uintN n` for `n ∉ {8, 16, 32, 64, 128, 256}` — the `BitVec n`
-  fallback collides with the same dependent-match limitation
-  `Serialize.lean` hit. Stub returns 32 zero bytes.
-* `progContainer` (EIP-7495 active-fields tree merkleization).
-* `stableContainer` (EIP-7495 fixed-`N` slot tree).
-* `compatUnion` (EIP-8016 explicit-selector mix-in over a sparse
-  variant set).
-
-The implemented cases (`uintN ∈ {8,16,32,64,128,256}`, `bool`,
-`bitvector`, `bitlist`, `vector`, `list`, `container`, `union`,
-`progBitlist`, `progList`) cover everything Phase 0 through Gloas
-needs and match the serializer's coverage one-for-one.
+`uintN n` is implemented for `n ∈ {8, 16, 32, 64, 128, 256}` —
+the widths used by consensus-spec types Phase 0 through Gloas.
+Other `n` fall through to a 32-byte zero chunk; the `BitVec n`
+fallback collides with the same dependent-match limitation
+`Serialize.lean` hits, and no consensus type exercises those
+widths, so the totality-preserving stub is sufficient.
 -/
 
 set_option autoImplicit false
@@ -358,22 +347,22 @@ def bitsToChunkCount (n : Nat) : Nat :=
 /-! ### The merkleizer
 
 A single `mutual` block: `hashTreeRoot` recurses structurally on
-`s : SSZType`; the list-traversing helpers (`hashTreeRootFields` for
-container/progContainer, `hashTreeRootListFixed` /
-`hashTreeRootListComposite` for collection bodies, `hashTreeRootUnion`
-for union variants) recurse structurally on their `List` argument.
-Cross-calls descend on subterms — same shape `Spec/Serialize.lean`
-and `Spec/Interp.lean` use. -/
+`s : SSZType`; the list-traversing helpers (`hashTreeRootFields`
+for container fields, `hashTreeRootListFixed` /
+`hashTreeRootListComposite` for collection bodies) recurse
+structurally on their `List` argument. Cross-calls descend on
+subterms — same shape `Spec/Serialize.lean` and `Spec/Interp.lean`
+use. -/
 
 mutual
 
 /-- Total SSZ Merkleization.
 
-Per consensus-specs *§Merkleization*. Unimplemented arms (see
-"Deferred arms" in the module docstring) return a 32-byte zero
-chunk so totality holds; callers that exercise those paths will
-observe the wrong root and fail conformance — by design, so the
-deferral cannot be silently shipped. -/
+Per consensus-specs *§Merkleization*. The `uintN n` arms outside
+the standard widths fall through to a 32-byte zero chunk so
+totality holds; callers that exercise those widths observe the
+wrong root and fail conformance, so the absence cannot be silently
+shipped. -/
 def SSZType.hashTreeRoot (H : Type) [Hasher H] :
     (s : SSZType) → s.interp → ByteArray
   | .uintN 8,             x  =>

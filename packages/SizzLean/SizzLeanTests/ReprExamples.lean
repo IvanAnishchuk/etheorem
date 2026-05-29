@@ -29,12 +29,11 @@ structure that lives in `BasicSupported` is a two-`Bool`
 container — exactly the `Pair` defined below.
 
 The integer examples after the `Pair` block exercise the four
-`uintN` arms shipped in Stage 18: thin wrappers around
+`uintN` arms of `BasicSupported`: thin wrappers around
 `UInt8` / `UInt16` / `UInt32` / `UInt64`, each closing
-`SSZ.roundtrip` via the corresponding `BasicSupported`
-constructor. Larger structures and structures with non-`Bool`
-fields ride on the general `containerFixed` widening planned
-for `BasicSupported`.
+`SSZ.roundtrip` via the corresponding constructor. Composite
+arms (`vectorFixed`, `listFixed`, `containerFixed`) are exercised
+further down at the spec-level `decode_encode`.
 -/
 
 set_option autoImplicit false
@@ -97,7 +96,7 @@ definitionally equal `.container [.bool, .bool]`. -/
 example (p : DPair) : SSZ.deserialize (SSZ.serialize p) = .ok p :=
   SSZ.roundtrip (.containerFixed (.cons .bool rfl (.cons .bool rfl .nil))) p
 
-/-! ### Integer arm examples — Stage 18 `uintN` widening
+/-! ### Integer arm examples — the four `uintN` widths
 
 Each `example` exercises one of the four `uintN` constructors of
 `BasicSupported`. The library-provided `SSZRepr` instances for
@@ -107,7 +106,7 @@ delegate to the spec functions and `SSZ.roundtrip` closes by
 direct application of the matching predicate constructor.
 
 These compile only if `decode_encode` discharges the integer arms;
-they are the typechecker-honest gate that the Stage 18 widening
+they are the typechecker-honest gate that the integer support
 holds end-to-end through the user surface. -/
 
 example (x : UInt8) : SSZ.deserialize (SSZ.serialize x) = .ok x :=
@@ -124,11 +123,11 @@ example (x : UInt64) : SSZ.deserialize (SSZ.serialize x) = .ok x :=
 
 /-! ### Composite arm examples
 
-Stage 18 also widens `BasicSupported` to general `vectorFixed`,
-`listFixed`, and `containerFixed`. Each arm carries small
-side-conditions (`0 < n` for vectors, `0 < t.fixedByteSize` for
-lists, an `allFixedSize` field list for containers); the witnesses
-are constructed inline below.
+`BasicSupported` also covers general `vectorFixed`, `listFixed`,
+and `containerFixed`. Each arm carries small side-conditions
+(`0 < n` for vectors, `0 < t.fixedByteSize` for lists, an
+`allFixedSize` field list for containers); the witnesses are
+constructed inline below.
 
 These examples exercise the *spec-level* `decode_encode` rather
 than the user-surface `SSZ.roundtrip`. The user-surface path

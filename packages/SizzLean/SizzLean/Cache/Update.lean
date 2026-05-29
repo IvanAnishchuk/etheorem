@@ -18,6 +18,17 @@ sszUpdate t with
   epoch           := e
 ```
 
+## Background: macros vs functions
+
+Unlike a regular Lean `def`, `sszUpdate` is implemented as a
+*term elaborator* (akin to a macro). Its body runs at compile
+time and produces a `Syntax` tree for the *real* expression Lean
+will then typecheck and compile. This lets the body inspect
+`t`'s elaborated type — known statically — and decide which
+piece of code to produce. The user sees one surface syntax;
+under the hood, the cached and uncached flavours expand to
+different code without any runtime dispatch.
+
 The elaborator inspects `t`'s type at expansion time and emits
 *specialised* code per cache flavour:
 
@@ -142,8 +153,7 @@ sszUpdate cached with balances := cached.view.balances.set! i newBal
 Cost: `Node.ofShape` rebuilds the *entire* `balances`
 sub-Merkle-tree on each call — O(cap) merkleization rather than
 O(log cap). Fine for one-off updates; impractical for
-state-transition loops on the cached path. Basic-packed indexing
-is a planned follow-up.
+state-transition loops on the cached path.
 
 ## Decisions
 

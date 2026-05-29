@@ -11,39 +11,35 @@ been computed — when a second tree-construction produces the same
 `(left, right, root)` triple, the smart constructor `Node.mkPair`
 returns the cached cell instead of allocating a fresh one.
 
-## What this version does (and doesn't)
+## What the cache covers
 
-**Ships:**
-
-* A global `IO.Ref`-backed LRU `Std.HashMap ByteArray Node`. The
+* A global `IO.Ref`-backed `Std.HashMap ByteArray Node`. The
   cache is bounded (default capacity 4096); when full, a simple
   "wipe-half" eviction policy keeps memory bounded without
   needing a real LRU linked-list.
 * `Node.mkPair` smart constructor: for `(left, right, some root)`
   triples it consults the cache; on hit, returns the cached
   cell. On miss, inserts and returns a fresh `.pair` allocation.
-* No-op for `(left, right, none)` — the dedup key (the root) is
+* `(left, right, none)` is a no-op — the dedup key (the root) is
   unknown until `merkleRootWithCache` computes it.
 
-**Defers:**
+## What the cache does not cover
 
-* Full bottom-up dedup at construction time (the ChainSafe
-  `persistent-merkle-tree` shape that delivers the documented
-  30% heap reduction on archive workloads). That requires
-  identity-keyed lookup on `(left, right)` before the root is
+* Bottom-up dedup at construction time (the ChainSafe
+  `persistent-merkle-tree` shape that delivers a ~30% heap
+  reduction on archive workloads). That would require
+  identity-keyed lookup on `(left, right)` *before* the root is
   known, which in turn requires the children themselves to be
-  consed. The recursive structural dependency makes that a
-  bigger refactor than this Phase ships.
+  consed first — a recursive structural dependency.
 * Integration into `Node.ofShape` (the construction site that
-  builds trees from `SSZRepr`). The current `Node.mkPair` is
-  available to integrate, but the call sites are left at their
-  existing `.pair` allocations so this phase is purely
-  additive — no behaviour change on existing trees, and any
-  caller can opt in.
+  builds trees from `SSZRepr`). `Node.mkPair` is available to
+  call but is not wired into `ofShape`'s `.pair` allocations,
+  so existing trees behave identically; opt-in by calling
+  `mkPair` directly.
 * Weak-reference semantics. The LRU bound provides upper-bound
-  memory pressure; weak refs would allow the cache to follow
-  Lean's refcount lifecycle naturally. Lean 4 doesn't expose a
-  weak-ref API today; LRU is the documented fallback.
+  memory pressure; weak refs would let the cache follow Lean's
+  refcount lifecycle naturally, but Lean 4 does not expose a
+  weak-ref API.
 
 ## How the LRU eviction works
 

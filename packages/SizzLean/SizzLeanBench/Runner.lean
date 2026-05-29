@@ -10,7 +10,7 @@ and prints one TSV row per benchmark. Output goes to stdout; the
 `ssz_bench` exe driver redirects it to `bench/<timestamp>.tsv`.
 
 TSV is chosen over JSON / Markdown because diffs across two runs
-are the workflow ("before" vs "after" a Stage-17 sub-stage), and
+are the workflow ("before" vs "after" a code change), and
 `diff -u before.tsv after.tsv` is the simplest possible comparator.
 Columns are fixed-width-friendly: a benchmark whose label changes
 between runs is treated as a new row, never a renamed one.

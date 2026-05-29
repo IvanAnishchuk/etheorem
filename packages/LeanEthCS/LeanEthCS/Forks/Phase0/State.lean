@@ -9,9 +9,8 @@ import SizzLean.Repr.Deriving
 # `LeanEthCS.Forks.Phase0.State` — `HistoricalBatch` and `BeaconState`
 
 The two Phase 0 composites whose SSZ shape varies between presets.
-Emitted per-preset via `ssz_struct_for_presets`; the `X.Minimal`
-variants are byte-identical to the previously hand-written minimal
-forms.
+Emitted per-preset via `ssz_struct_for_presets`, which stamps out
+matching `Minimal` and `Mainnet` variants from a single declaration.
 
 ## Preset-sensitive caps used here
 

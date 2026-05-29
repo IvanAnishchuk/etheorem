@@ -34,15 +34,15 @@ iteration starts from a fully-cached top. Each iteration runs
 `SLOTS_PER_RUN` slots; every `SLOTS_PER_EPOCH = 32` slots triggers
 an "epoch transition" with extra writes.
 
-## Why this scenario differs from S1–S6
+## Why this scenario differs from the synthetic ones
 
-The earlier scenarios use synthetic `ValidatorSet256` /
-`ValidatorSet16` fixtures — a vector-of-containers shape. They
-miss what makes a real BeaconState heavy: 37 top-level fields of
-mixed shapes, mainnet-preset constants (8K block-roots, 64K
-randao-mixes), and a deep nested container surface. This row
-measures the cache's behaviour on a top-level container an
-Ethereum consensus client actually mutates.
+The S1–S6 scenarios use `ValidatorSet256` / `ValidatorSet16`
+fixtures — a vector-of-containers shape. Those miss what makes a
+real BeaconState heavy: 37 top-level fields of mixed shapes,
+mainnet-preset constants (8K block-roots, 64K randao-mixes), and
+a deep nested container surface. This row measures the cache's
+behaviour on a top-level container an Ethereum consensus client
+actually mutates.
 
 ## Why the bench-local copy of Fulu types
 

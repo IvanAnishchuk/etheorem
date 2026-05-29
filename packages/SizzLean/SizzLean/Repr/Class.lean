@@ -44,28 +44,39 @@ The library's `decode_encode` proof currently covers the
   composites over fixed-size element / field types
   (`BasicSupported t` with `t.isFixedSize = true`).
 * `.container [.bool, .bool]` — concrete two-`Bool` container,
-  retained as a `def`-level alias of `containerFixed (.cons .bool
-  rfl (.cons .bool rfl .nil))` for backward-compat with the
-  hand-written `Pair` example.
+  exposed as a `def`-level alias of `containerFixed (.cons .bool
+  rfl (.cons .bool rfl .nil))` so the hand-written `Pair` example
+  can name the witness directly.
 
 The user-surface corollary inherits that gate: a user type whose
 shape sits inside `BasicSupported` enjoys verified roundtrip; a
-user type whose shape is outside `BasicSupported` (currently
-`.bitvector` and `.bitlist` — both pending the bit-packing
-inverse proof) enjoys total `serialize` / `deserialize` (the
-spec functions are total) but no verified roundtrip yet. Wider
-proof coverage is planned future work; until it lands the gate is
+user type whose shape is outside `BasicSupported` (`.bitvector`
+and `.bitlist`, neither covered by a bit-packing inverse proof in
+this layer) enjoys total `serialize` / `deserialize` (the spec
+functions are total) but no verified roundtrip. The gate is
 honest about scope and grows automatically as the proof set
 widens.
 
-## Lean idioms used here
+## Lean idioms used here (annotated on first appearance)
 
-* `class C T where` — typeclass declaration; instances are
-  resolved at call sites via `[C T]` instance binders.
-* `Hasher.hash`/`Hasher.combine` arguments resolved by `(H := H)`
-  named arguments — `H` is a phantom tag with no occurrences in
-  the methods' types, so instance synthesis can't recover it from
-  value arguments. Same idiom as `Spec/HashTreeRoot.lean`.
+* `class C T where … end` — declares a typeclass. The fields
+  inside `where` are the methods; an `instance : C T := …` value
+  supplies them for a particular `T`. At a call site, an
+  *instance binder* `[C T]` asks the compiler to find a
+  registered instance for `T` — this resolution step is called
+  *instance synthesis*.
+* `(H := H)` — *named-argument* syntax for passing the value `H`
+  to a function's explicit parameter also called `H`. Useful
+  when `H` is a *phantom tag* — a type parameter that appears in
+  the function's signature but not in any of its argument or
+  return types. Instance synthesis cannot recover a phantom from
+  value arguments (there is nothing to look at), so the caller
+  must pass it explicitly. Same idiom as `Spec/HashTreeRoot.lean`.
+* `inductive … : Prop` for `BasicSupported` — the witness lives
+  in `Prop`, Lean's universe of propositions whose proofs are
+  erased at runtime. Using `Prop` lets `decode_encode` take a
+  `BasicSupported r.shape` hypothesis without it appearing in
+  the compiled binary.
 -/
 
 set_option autoImplicit false

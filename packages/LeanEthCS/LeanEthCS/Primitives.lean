@@ -4,11 +4,11 @@ import SizzLean.Repr.Instances
 /-!
 # `LeanEthCS.Primitives` — consensus-specs primitive types
 
-PLAN.md Stage 10's foundation. Each definition here is a faithful
-Lean transcription of a consensus-specs *primitive* — the named
-types (`Slot`, `Epoch`, `BLSPubkey`, …) used throughout the
-beacon-chain specification. Composite types in `SizzLean/Eth/Phase0/`,
-`Altair/`, etc. build on these via `deriving SSZRepr`.
+Each definition here is a faithful Lean transcription of a
+consensus-specs *primitive* — the named types (`Slot`, `Epoch`,
+`BLSPubkey`, …) used throughout the beacon-chain specification.
+Composite types under `LeanEthCS/Forks/Phase0/`, `Altair/`, etc.
+build on these via `deriving SSZRepr`.
 
 ## Naming convention
 
@@ -29,8 +29,9 @@ format is identical either way.
 
 These map line-for-line to consensus-specs/specs/phase0/beacon-chain.md
 *§Custom types* and the subsequent fork-deltas. Widths and lengths
-are not extracted to constants here (yet); a future commit can fold
-them into `SizzLean/Eth/Constants.lean` once enough deltas pile up.
+are inlined at each `abbrev` rather than pulled from named
+constants — the spec text uses the literal numbers in the same
+places, and a named-constant indirection would obscure the mapping.
 -/
 
 set_option autoImplicit false

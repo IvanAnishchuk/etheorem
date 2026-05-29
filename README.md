@@ -82,12 +82,13 @@ Per-subpackage design docs live next to the code they describe:
   background research (`pre-research.md`, `cache-research.md`).
 - [`packages/<Pkg>/README.md`](packages/) — per-subpackage READMEs.
 
-Repo-wide docs at the root:
+Repo-wide docs:
 
+- [`docs/monorepo-arch.md`](docs/monorepo-arch.md) — how the monorepo is
+  laid out: the three-subpackage shape, which lakefiles are TOML vs
+  procedural, where the FFI C shim lives, the LeanSha256 standalone
+  mirror, and the naming / dep / build conventions.
 - [`CLAUDE.md`](CLAUDE.md) — style and discipline conventions, project-wide.
-- [`monorepo-arch.md`](monorepo-arch.md) — how the monorepo is laid out:
-  the three-subpackage shape, which lakefiles are TOML vs procedural,
-  where the FFI C shim lives, and the naming / dep / build conventions.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — PR / issue workflow,
   toolchain setup, code-style pointers.
 - [`SECURITY.md`](SECURITY.md) — vulnerability-disclosure policy.

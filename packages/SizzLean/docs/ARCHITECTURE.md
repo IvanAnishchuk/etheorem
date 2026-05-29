@@ -8,7 +8,7 @@ the `SSZRepr` typeclass + deriving handler, the cached Merkle-tree
 layer, the `sszUpdate` macro, and the FFI-backed `Hasher Sha256`
 instance. It is one of three sibling subpackages in the *Etheorem*
 monorepo at the repo root (see `../../../README.md` and
-`../../../monorepo-arch.md`).
+`../../../docs/monorepo-arch.md`).
 
 The goal is a faithful, formally verified encoder / decoder /
 merkleizer — *one* set of proofs that every Ethereum consensus
@@ -1350,7 +1350,8 @@ lakefile. `LeanSha256` uses `lakefile.toml` (pure Lean, no FFI);
 ├── lakefile.toml                       # umbrella; requires the three subpackages
 ├── lean-toolchain
 ├── lake-manifest.json
-├── README.md / CLAUDE.md / monorepo-arch.md
+├── README.md / CLAUDE.md               # repo-wide overview + conventions
+├── docs/                               # repo-wide design docs (monorepo-arch.md)
 ├── scripts/                            # Python harnesses (run_conformance.py, …)
 └── packages/
     ├── LeanSha256/                     # pure-Lean SHA-256 reference (no FFI)

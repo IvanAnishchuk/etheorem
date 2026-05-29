@@ -98,9 +98,10 @@ function on every input as the pure-Lean reference. Empirically
 validated by `Sha256BatchEquivalence.lean`; promoted here to a
 named Lean axiom so proofs that depend on the batched primitive
 can be audited via `#axioms`. Same trust footprint as
-`sha256Combine_eq_spec` — we trust OpenSSL plus the C shim's
-loop. Replaceable by a `@[csimp]`-proved theorem when one lands;
-proof shapes stay identical. -/
+`sha256Combine_eq_spec` — the trust commitment is OpenSSL plus
+the C shim's loop. A `@[csimp]`-proved theorem with the same
+statement could replace this axiom without disturbing dependent
+proofs. -/
 axiom sha256BatchCombine_eq_spec :
     @sha256BatchCombine = sha256BatchCombineSpec
 

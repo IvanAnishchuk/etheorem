@@ -69,12 +69,14 @@ required — both sides of the equality invoke the same opaque
 them without ever caring what the bytes are. Reach for these
 axioms only when a goal requires the hash to *actually compute*.
 
-## Future hardening
+## Trust commitment
 
-A planned `@[csimp]`-attributed equality between the FFI and the
-spec hashers would replace these axioms with theorems carrying
-the same statements; every dependent proof tightens automatically
-— no theorem statements need to change.
+The axioms encode an empirical equivalence between two
+implementations of SHA-256. A `@[csimp]`-attributed equality
+proved from primitives would discharge them, leaving every
+dependent proof with identical statements — the axioms are
+named so that path can be taken without rewriting downstream
+theorems.
 -/
 
 set_option autoImplicit false
@@ -89,8 +91,8 @@ NIST-validated reference). Empirically validated by
 promoted here to a named Lean axiom so proofs that depend on it
 can be audited via `#axioms`.
 
-Replaceable by a `@[csimp]`-proved theorem when one lands; proof
-shapes stay identical. -/
+A `@[csimp]`-proved theorem with the same statement could replace
+this axiom without disturbing dependent proofs. -/
 axiom sha256Hash_eq_spec : @sha256Hash = LeanSha256.hash
 
 /-- **Axiom**: the FFI-backed `sha256Combine` (which calls

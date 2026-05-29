@@ -54,7 +54,7 @@ dependency chain:
 LeanSha256  ←  SizzLean  ←  LeanEthCS
 ```
 
-See [`monorepo-arch.md`](monorepo-arch.md) for the full
+See [`docs/monorepo-arch.md`](docs/monorepo-arch.md) for the full
 layout: which lakefiles are procedural vs declarative, where the
 FFI C shim lives, naming conventions, and the dep policy.
 

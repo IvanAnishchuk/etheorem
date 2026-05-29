@@ -16,21 +16,24 @@ automatically.
 
 ## Why an inductive, not a typeclass
 
-Earlier iterations of this file held a `class SSZCaching H T C`
-that abstracted over the two cache shapes via instance dispatch.
-That worked for *observational* code (reading the view, computing
-the root) but couldn't be made to drive `sszUpdate` cleanly without
-widening the typeclass surface with a Merkle-shaped `Patch` field
-that leaked the cache implementation into the public API.
-
-`Box` solves the same problem in a closed-world setting:
+A typeclass `SSZCaching H T C` abstracting over the two cache
+shapes via instance dispatch can carry *observational* code
+(reading the view, computing the root) but cannot drive
+`sszUpdate` cleanly: doing so requires a Merkle-shaped `Patch`
+field on the class that would leak the cache implementation into
+the public API. The inductive `Box` keeps the same dispatch closed:
 
 * The two constructors enumerate the *entire* design space — no
   third-party `SSZCaching` instance can sneak in, so the
   `sszUpdate` elaborator's two-arm match handles every case at
   compile time.
 * No `outParam` machinery, no instance resolution dance — just an
-  ordinary inductive type with two constructors.
+  ordinary inductive type with two constructors. (`outParam` is
+  the marker on a typeclass parameter that lets instance synthesis
+  *infer* one type from another — e.g. `HAdd α β γ` with `γ` as
+  `outParam` so the addition's result type is determined by the
+  two operands. Useful when overload resolution would otherwise
+  loop; unnecessary here.)
 * `sszUpdate s with f := v` on an `SSZ.Box H T` expands to:
     `match s with`
     `| .cached t   => .cached (sszUpdate t with f := v)`
@@ -43,13 +46,12 @@ that leaked the cache implementation into the public API.
 
 ## Trade-off
 
-The set of cache flavours is genuinely closed. A new flavour
+The set of cache flavours is closed by design. A new flavour
 (hash-consed, deferred-update overlay, …) would mean editing the
 `Box` inductive plus the `sszUpdate` macro's box-emission arm.
-For this project that's deliberate: production and proof are the
-two flavours we know we need, and we'd rather rule out other
-configurations at the type level than carry the open-typeclass
-machinery for one.
+Production and proof are the two flavours required, and ruling
+out other configurations at the type level avoids carrying the
+open-typeclass machinery for one of them.
 
 ## Smart-constructor naming
 

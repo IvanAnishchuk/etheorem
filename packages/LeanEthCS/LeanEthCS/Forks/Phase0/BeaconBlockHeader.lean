@@ -5,8 +5,8 @@ import SizzLean.Repr.Deriving
 # `LeanEthCS.Forks.Phase0.BeaconBlockHeader`
 
 Smallest non-trivial Phase 0 composite — five fixed-size primitive
-fields. The canonical first test of the `deriving SSZRepr` handler
-against consensus-spec types.
+fields. A useful first reading of the `deriving SSZRepr` handler
+against a real consensus-spec type.
 
 Per `consensus-specs/specs/phase0/beacon-chain.md`:
 
@@ -43,8 +43,8 @@ structure BeaconBlockHeader where
 
 /-- Smoke-test: a default-valued header round-trips via the
 `SSZRepr`-driven encode/decode pair. Closed by `native_decide` — the
-verified `SSZ.roundtrip` corollary is gated on `BasicSupported` until
-Stage 18 widens it. -/
+verified `SSZ.roundtrip` corollary is gated on `BasicSupported` and
+this concrete check sits outside that surface. -/
 private def roundTripBBH (h : BeaconBlockHeader) : Bool :=
   match SSZ.deserialize (T := BeaconBlockHeader) (SSZ.serialize h) with
   | .ok h' => decide (h'.slot = h.slot) &&

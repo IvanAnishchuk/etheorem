@@ -13,8 +13,8 @@ typically wrap.
   compatible; verified `SSZ.roundtrip` available.
 * `SSZRepr UInt8` / `UInt16` / `UInt32` / `UInt64` — shapes
   `.uintN 8` / `16` / `32` / `64`, identity iso. All four are
-  `BasicSupported`-compatible (Stage 18 widening); verified
-  `SSZ.roundtrip` is available via the matching constructors
+  `BasicSupported`-compatible; verified `SSZ.roundtrip` is
+  available via the matching constructors
   (`.uintN8` / `.uintN16` / `.uintN32` / `.uintN64`).
 * `SSZRepr (BitVec 128)` / `(BitVec 256)` — same shape, identity
   iso. Used for the 128/256-bit fields in consensus containers.
@@ -32,10 +32,16 @@ in the instance (`.bool`, `.uintN k`) is defined so that
 laws (`to_from`, `from_to`) close by `rfl` because the kernel sees
 `x = x` after `interp` reduction.
 
-Lean inference picks up the `definitional equality` automatically:
-the literal `id` (or the lambda `fun x => x`) typechecks at both
-`T → shape.interp` and `shape.interp → T` because Lean unfolds
-`interp` when checking the function bodies' types.
+*Definitional equality* (often "defeq" in Lean prose) is the
+equivalence the kernel can decide by pure reduction — beta
+reduction, delta-unfolding of `@[reducible]` definitions, and
+iota-reduction of pattern matches. It's what `rfl` proves; it's
+also what Lean's type-equality check uses when it asks "does
+this expression's type match the expected one?". Because
+`interp .bool` *reduces* to `Bool` (not just *equals* it
+propositionally), the literal `id` typechecks at both
+`Bool → interp .bool` and `interp .bool → Bool` with no
+coercion.
 -/
 
 set_option autoImplicit false
@@ -103,7 +109,7 @@ definitional when `α` has identity-iso `SSZRepr` (which all the
 built-in instances and any `abbrev`-based newtype wrapper satisfy),
 `toRepr` and `fromRepr` are both `id`. A more general
 element-wise-mapping iso would be needed if non-identity inner isos
-ever entered scope; deferred until that case appears. -/
+appear in scope. -/
 
 /-- `SSZRepr (BitVec 128)` — wire format is 16 little-endian bytes
 (the SSZ `uint128` shape). -/

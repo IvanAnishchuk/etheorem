@@ -15,17 +15,37 @@ from EIP-7495, `ProgressiveList` / `ProgressiveBitlist` from EIP-7916,
 `CompatibleUnion` from EIP-8016) are out-of-scope here — see the
 docstring on `SizzLean.Spec.Type` for the rationale.
 
+## Background: how Lean accepts recursive definitions
+
+A recursive `def` must be proved total before Lean will accept it.
+The compiler offers two paths:
+
+* **Structural recursion** — the cheap path. Each recursive call's
+  argument must be a *strict subterm* of the caller's input, where
+  "subterm" is read off the inductive's definition (pattern
+  matches expose subterms). Termination follows automatically. The
+  *equation compiler* is the part of Lean's elaborator that
+  translates a top-level `def` with pattern matches into the
+  primitive recursor and checks this property.
+* **Well-founded recursion** — the general path. The programmer
+  supplies a `termination_by` measure (some quantity that
+  decreases on every recursive call) and Lean asks for proof. More
+  powerful but heavier.
+
+The definitions below use the structural path, which is what
+shapes the `mutual` block.
+
 ## Why a `mutual` block
 
-A first attempt at `interp` (matching ARCHITECTURE.md §3.2's sketch)
-defined the `container` case as `HList SSZType.interp fs` — a
-heterogeneous list parameterised by `interp` itself. Lean 4.29.1's
-structural-recursion checker rejects that form: passing the
-recursive function as a higher-order argument hides the descent on
-`fs`, and the equation compiler reports "unexpected occurrence of
-recursive application". Well-founded recursion fares no better
-because the obligation `sizeOf a < sizeOf (.container fs)` lacks the
-membership hypothesis `a ∈ fs` that would make it provable.
+A natural sketch of `interp` (matching ARCHITECTURE.md §3.2)
+defines the `container` case as `HList SSZType.interp fs` — a
+heterogeneous list parameterised by `interp` itself. The
+structural checker rejects that form: passing the recursive
+function as a higher-order argument hides the descent on `fs`,
+and the equation compiler reports *"unexpected occurrence of
+recursive application"*. Well-founded recursion fares no better
+because the obligation `sizeOf a < sizeOf (.container fs)` lacks
+the membership hypothesis `a ∈ fs` that would make it provable.
 
 The fix is to inline each list traversal as a mutually recursive
 helper that consumes its list cons-by-cons. Each helper recurses

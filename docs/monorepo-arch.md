@@ -21,17 +21,21 @@ LeanSha256  ←  SizzLean  ←  LeanEthCS
 ├── lakefile.toml                     # umbrella; declares no Lean libraries of its own
 ├── lake-manifest.json                # committed (per the dep policy in CLAUDE.md)
 ├── .gitignore
-├── README.md / CLAUDE.md / monorepo-arch.md
+├── README.md / CLAUDE.md             # repo-wide overview + style/discipline conventions
+├── docs/                             # repo-wide design docs (this file)
 ├── Justfile                          # task runner over the umbrella
 ├── scripts/                          # Python harnesses (run_conformance.py, …)
 └── packages/
-    ├── LeanSha256/
-    │   ├── lakefile.toml             # pure Lean, no C, declarative
+    ├── LeanSha256/                   # also published standalone — see "The LeanSha256 mirror"
+    │   ├── lakefile.toml             # pure Lean, no C; carries the name/version/license the mirror ships
+    │   ├── lean-toolchain            # pinned copy so the split-out repo builds on its own
+    │   ├── LICENSE                   # pinned copy of the umbrella LGPL-3.0; keeps the mirror self-contained
     │   ├── LeanSha256.lean           # library root
     │   ├── LeanSha256/               # Core.lean, Nist.lean
     │   ├── cavp/                     # NIST CAVP fixtures consumed by Nist.lean
     │   ├── LeanSha256Tests/          # in-Lean conformance gates
-    │   └── README.md
+    │   ├── scripts/                  # bump_patch.py (release tag), gen_sha256_cavp.py
+    │   └── README.md                 # "issues belong in the umbrella" mirror notice
     ├── SizzLean/
     │   ├── lakefile.lean             # procedural — needed for the FFI C-shim target
     │   ├── csrc/                     # sha256_shim.c, sha256_batch.c
@@ -41,6 +45,7 @@ LeanSha256  ←  SizzLean  ←  LeanEthCS
     │   ├── SizzLeanTests/            # property tests + acceptance gates
     │   ├── SizzLeanBench/            # microbench scenarios + Fulu reference fixture
     │   ├── bench/                    # session-output TSVs (gitignored)
+    │   ├── MANUAL.md                 # user's guide to writing code against SizzLean
     │   └── README.md
     └── LeanEthCS/
         ├── lakefile.toml             # declarative
@@ -67,8 +72,11 @@ needs to land coherently: a `SizzLean` cache-layer tweak that
 breaks `LeanEthCS`'s deriving call sites should be fixed in one
 commit, not three. The umbrella `lakefile.toml` `[[require]]`s
 all three subpackages by relative path so `lake build` at the
-root builds the whole dependency chain in order. Per-package
-publication repos will exist later; this is a development
+root builds the whole dependency chain in order. `LeanSha256`
+already publishes standalone via a read-only subtree mirror (see
+[The LeanSha256 mirror](#the-leansha256-mirror)); `SizzLean` and
+`LeanEthCS` may follow the same pattern. Either way the umbrella
+stays the single source of truth — this is a development
 monorepo.
 
 **`SizzLean` keeps `lakefile.lean`; the others use TOML.** Lake
@@ -134,6 +142,62 @@ syntax.
   Subpackages do not override it. Bumps cascade through CI and
   through every dep.
 
+## The LeanSha256 mirror
+
+`packages/LeanSha256/` is published a second time as a standalone
+repository at <https://github.com/etheorem/LeanSha256>. This is
+the only subpackage mirrored today; `SizzLean` and `LeanEthCS`
+live only in the umbrella.
+
+**Why a separate repo exists.** [Reservoir](https://reservoir.lean-lang.org),
+the Lean package index, indexes repository *roots* — it cannot
+see a package that sits in a monorepo subdirectory. For
+`LeanSha256` to be independently discoverable and installable as
+a Lake dependency, its source has to appear at the root of some
+repo. The mirror is that repo.
+
+**The mirror is one-way and read-only.** The umbrella is the
+single source of truth: all development, issues, and PRs happen
+here, under `packages/LeanSha256/`. The downstream repo is a
+generated artifact — its `README.md` carries a banner redirecting
+contributions to the umbrella, and any direct push to its `main`
+is overwritten by the next mirror run.
+
+**It regenerates automatically.** The
+[`.github/workflows/mirror-leansha256.yml`](../.github/workflows/mirror-leansha256.yml)
+workflow runs on every push to the umbrella's `main` and on
+`leansha256-v*` tags. It uses `git subtree split
+--prefix=packages/LeanSha256` to produce a synthetic branch
+containing only the commits that touched that subtree, with paths
+re-rooted at the package directory and authorship/dates/messages
+preserved — so the downstream carries real per-file history, not
+a single squashed import. The split tip is pushed to the
+downstream `main` over SSH using a deploy key held in
+`secrets.LEANSHA256_DEPLOY_KEY` (configured on the downstream
+repo; this workflow is the only holder), guarded by a
+`--force-with-lease` against the live downstream tip.
+
+**Releases are tag-driven.** A `leansha256-vX.Y.Z` annotated tag
+on the umbrella is translated by the same workflow into a plain
+`vX.Y.Z` tag on the downstream, which Reservoir surfaces as a
+release version. `just bump-leansha256-patch` (wrapping
+`packages/LeanSha256/scripts/bump_patch.py`) automates the
+high-frequency patch bump: it edits the `version` field in
+`packages/LeanSha256/lakefile.toml`, commits, and creates the
+`leansha256-v*` tag locally — it deliberately does *not* push, so
+the maintainer reviews before publishing. Minor/major bumps are
+done by hand.
+
+**Why the package carries its own metadata.** The standalone
+`lakefile.toml`, `lean-toolchain`, and `LICENSE` under
+`packages/LeanSha256/` (noted in the tree above) exist *for* the
+mirror: the split-out repo has no umbrella `lakefile.toml`,
+`lean-toolchain`, or root `LICENSE` to inherit, so each must be
+self-contained inside the package directory for the downstream to
+build and for Reservoir to read its name/version/license. The
+umbrella's root `LICENSE` remains the upstream copy; the
+package-local copy is overwritten to match on each mirror run.
+
 ## Build menu
 
 ```bash
@@ -172,12 +236,15 @@ for the full set.
 * `lake-manifest.json` — pinned external deps for the umbrella.
 * `scripts/` — Python harnesses that drive the cross-package
   conformance runner.
-* `.github/` — CI workflows.
+* `docs/` — repo-wide design docs (this file). Distinct from the
+  per-subpackage `packages/<Pkg>/docs/` below.
+* `.github/` — CI (`lean_action_ci.yml`) plus the LeanSha256
+  subtree-mirror workflow (`mirror-leansha256.yml`).
 * `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`,
   `CODE_OF_CONDUCT.md` — project-wide governance.
 
-Per-subpackage design docs live under
-`packages/<Pkg>/docs/` (currently only `SizzLean` has any —
-ARCHITECTURE / PLAN / OPTIMISATION / research). When `LeanEthCS`
-or `LeanSha256` grow their own design notes, they follow the
-same convention.
+Repo-wide design docs live in the root `docs/` (this file).
+Per-subpackage design docs live under `packages/<Pkg>/docs/`
+(currently only `SizzLean` has any — ARCHITECTURE / PLAN /
+OPTIMISATION / research). When `LeanEthCS` or `LeanSha256` grow
+their own design notes, they follow the same convention.

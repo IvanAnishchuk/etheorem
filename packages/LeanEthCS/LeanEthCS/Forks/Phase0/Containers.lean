@@ -12,9 +12,9 @@ definitions in `consensus-specs/specs/phase0/beacon-chain.md`.
 
 Variable-size containers (`Attestation`, `IndexedAttestation`,
 `BeaconBlockBody`, `BeaconState`) live in dedicated files because
-they exercise the variable-field offset-table path that Sub-phase
-3.1 lit up — keeping them separate makes it easier to spot a
-regression in that path vs. one in the simple fixed-field path.
+they exercise the variable-field offset-table path — keeping them
+separate makes it easier to spot a regression in that path vs.
+one in the simple fixed-field path.
 -/
 
 set_option autoImplicit false

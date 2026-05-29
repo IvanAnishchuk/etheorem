@@ -6,11 +6,10 @@ import SizzLean.Spec.Serialize  -- for isFixedSize / allFixedSize
 
 A *strict subset* of `SSZType.Supported` (in `Spec/Supported.lean`)
 that the three central theorems (`decode_encode`,
-`serialize_injective`, `encode_size_le_max`) are currently proved
-for. Each constructor here names an `SSZType` shape on which the
-proofs close exhaustively; adding a constructor obliges the
-proofs to extend. The predicate can be retired entirely once the
-proofs cover all of `Supported`.
+`serialize_injective`, `encode_size_le_max`) are proved for. Each
+constructor here names an `SSZType` shape on which the proofs
+close exhaustively; adding a constructor obliges the proofs to
+extend.
 
 The predicate lives in `Spec/` (not `Proofs/`) because the
 user-facing `SSZ.roundtrip` corollary in `Repr/Class.lean`
@@ -18,7 +17,7 @@ mentions it — a layering concern that follows ARCHITECTURE.md §2's
 library-then-surface flow (Spec layer below, Repr layer above;
 Proofs/ reaches over to discharge the theorems).
 
-## Coverage (current)
+## Coverage
 
 * **Basic integers**: `.uintN 8 / 16 / 32 / 64` (closed in
   `Proofs/UInt.lean` via `unfold` + `bv_decide`).
@@ -29,16 +28,17 @@ Proofs/ reaches over to discharge the theorems).
   via mutual induction with the shared prereq
   `Proofs/SerializeSize.lean`).
 
-## Deferred (still outside `BasicSupported`)
+## Outside `BasicSupported`
 
-* **Bitvector** (`.bitvector n` with `0 < n`) — bit-packing
-  inverse `packBitsLE_unpackBitsLEAux_inverse` not yet shipped.
-* **Bitlist** (`.bitlist cap`) — adds `msbPos` delimiter
-  recovery on top of bitvector's prerequisites.
+* **Bitvector** (`.bitvector n` with `0 < n`) — the bit-packing
+  inverse `packBitsLE_unpackBitsLEAux_inverse` has no proof in
+  this layer.
+* **Bitlist** (`.bitlist cap`) — needs `msbPos` delimiter
+  recovery on top of the bitvector prerequisites.
 
 Both arms remain `Supported` (the spec implements them and
 conformance passes), but the `decode_encode` corollary is
-ungated for these shapes pending the bit-packing proofs.
+ungated for these shapes.
 
 ## Why two mutually inductive predicates
 
@@ -53,11 +53,10 @@ constructor takes a `BasicSupported t` witness for the head.
 The spec rejects `n = 0` at *decode* time for both shapes
 (`ssz_generic/basic_vector/invalid/vec_*_0` and
 `ssz_generic/bitvector/invalid/bitvec_0` test cases), so the
-universal roundtrip would fail in those constructors. We carry
-the precondition only at the `BasicSupported` layer rather than
-tightening `Supported` itself — the latter is a more invasive
-spec adjustment that PLAN.md's *full* Stage 18 closure will need
-to do anyway, but it can wait.
+universal roundtrip would fail in those constructors. The
+precondition is carried at the `BasicSupported` layer rather than
+tightening `Supported` itself, which would be a more invasive
+spec adjustment.
 
 -/
 
@@ -70,8 +69,7 @@ mutual
 an `SSZType` shape for which all three central theorems
 (`decode_encode`, `serialize_injective`, `encode_size_le_max`) are
 proved in `Proofs/`. Adding a constructor obliges the proofs to
-extend; the planned generalisation widens this to all of
-`SSZType.Supported`. -/
+extend. -/
 inductive SSZType.BasicSupported : SSZType → Prop
   /-- Single-byte unsigned integer. `serialize` is `empty.push x`;
   the roundtrip closes by `rfl` after one `unfold`. -/
