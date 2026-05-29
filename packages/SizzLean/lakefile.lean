@@ -1,11 +1,24 @@
 -- SizzLean subpackage — Lake configuration.
 --
--- Uses `lakefile.lean` rather than `lakefile.toml` because the FFI
--- SHA-256 shim (`csrc/sha256_shim.c`) needs a procedural build
--- target (`buildO` over a `.c` file) that TOML cannot express. This
--- is the only subpackage in the Etheorem monorepo that needs a
--- procedural lakefile; `LeanSha256` (pure Lean) and `LeanEthCS`
--- (consumes SizzLean) both use `lakefile.toml`.
+-- Uses `lakefile.lean` rather than `lakefile.toml` for the
+-- `pkg-config`-driven OpenSSL discovery (`opensslLinkArgs`) and the
+-- one-directory-deep glob auto-discovery (`globsUnder`), neither of
+-- which the declarative TOML form can express.
+--
+-- The FFI SHA-256 binding itself no longer lives here: it was moved
+-- to the `LeanHazmatSha256` package (hazmat-docs/ARCHITECTURE.md §9,
+-- PLAN.md Stage 1). SizzLean now `require`s that package for the FFI
+-- shim and keeps only the *spec-side* machinery — the `Hasher`
+-- typeclass, the `Sha256` tag + instance, and the FFI ≡ pure-Lean
+-- equivalence axioms, the one place entitled to import both the FFI
+-- binding and the `LeanSha256` spec.
+--
+-- SizzLean still discovers OpenSSL link args because Lake does NOT
+-- propagate a dependency's `moreLinkArgs` across `require` (PLAN.md
+-- Stage 0): the `LeanHazmatSha256` `extern_lib` *archive* is linked
+-- into SizzLean's executables (`ssz_bench`, `ssz_profile`)
+-- transitively, but the `-lcrypto` flag that archive needs is not, so
+-- SizzLean re-supplies it here for its own exes.
 
 import Lake
 open Lake DSL System
@@ -82,16 +95,6 @@ unsafe def opensslLinkArgs : Array String :=
   let libDirFlags := libDir.map (fun d => "-L" ++ d)
   libDirFlags ++ libs
 
-/-- OpenSSL `-I<dir>` flags via `pkg-config --cflags libcrypto`,
-appended to `cShimFlags` so the C shims find `<openssl/evp.h>`.
-On Debian / Ubuntu the headers live at `/usr/include` and no
-explicit `-I` is needed; on macOS Homebrew openssl@3 is keg-only
-and the `.pc` file's `-I/opt/homebrew/opt/openssl@3/include` is
-load-bearing. Empty fallback keeps Debian working when pkg-config
-is missing. -/
-unsafe def opensslCFlags : Array String :=
-  runPkgConfig #["--cflags", "libcrypto"] #[]
-
 package SizzLean where
   -- SPDX identifier; the LICENSE file lives at the umbrella root.
   -- Reservoir requires a single-identifier SPDX expression.
@@ -114,42 +117,17 @@ package SizzLean where
   -- binary switch to a portable baseline (`-march=x86-64-v3`).
   moreLeancArgs := #["-march=native"]
 
+-- The pure-Lean SHA-256 spec. SizzLean is the layer that imports
+-- both this and the FFI binding below, and holds the equivalence
+-- axioms tying them together (hazmat-docs/ARCHITECTURE.md §9).
 require LeanSha256 from "../LeanSha256"
 
--- C optimisation flags shared by every hand-written shim in this
--- package. `-O3` enables full optimisation (default `cc` is `-O0`);
--- `-march=native` lets the compiler emit SHA-NI / AVX2 / AVX-512
--- intrinsics matching the build host. `-march=native` bakes in the
--- build machine's ISA — fine for local builds and the bench; if we
--- ever ship a portable binary, switch to `-march=x86-64-v3` (AVX2
--- baseline) or per-arch dispatch. The trailing `opensslCFlags` adds
--- the `-I<dir>` paths from `pkg-config --cflags libcrypto` so the
--- shims find `<openssl/evp.h>` on systems (macOS Homebrew, Nix)
--- where it doesn't live in the compiler's default search path.
-def cShimFlags (leanInclude : FilePath) : Array String :=
-  #["-fPIC", "-O3", "-march=native", "-I", leanInclude.toString]
-    ++ (unsafe opensslCFlags)
-
-target sha256_shim.o pkg : FilePath := do
-  let src := pkg.dir / "csrc" / "sha256_shim.c"
-  let obj := pkg.buildDir / "csrc" / "sha256_shim.o"
-  let leanInclude ← getLeanIncludeDir
-  buildO obj (← inputTextFile src) (cShimFlags leanInclude) #[] "cc" getLeanTrace
-
--- Stage 17b: batched SHA-256 sibling combine. Same compilation
--- shape as `sha256_shim.o`; the two `.o` files are linked into one
--- static lib (below).
-target sha256_batch.o pkg : FilePath := do
-  let src := pkg.dir / "csrc" / "sha256_batch.c"
-  let obj := pkg.buildDir / "csrc" / "sha256_batch.o"
-  let leanInclude ← getLeanIncludeDir
-  buildO obj (← inputTextFile src) (cShimFlags leanInclude) #[] "cc" getLeanTrace
-
-extern_lib libssz_sha256 pkg := do
-  let shimFile  ← sha256_shim.o.fetch
-  let batchFile ← sha256_batch.o.fetch
-  let name := nameToStaticLib "ssz_sha256"
-  buildStaticLib (pkg.staticLibDir / name) #[shimFile, batchFile]
+-- The FFI SHA-256 binding (OpenSSL `libcrypto`). Provides the
+-- `LeanHazmat.Sha256.sha256Hash` / `sha256Combine` / `sha256BatchCombine`
+-- externs that the `Hasher Sha256` instance and the equivalence
+-- axioms delegate to. Its `extern_lib` archive is linked
+-- transitively into SizzLean's executables.
+require LeanHazmatSha256 from "../LeanHazmatSha256"
 
 @[default_target]
 lean_lib SizzLean where

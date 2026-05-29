@@ -27,18 +27,22 @@ their own code. They map one-to-one onto the sections of
 * `Spec/SSZError` — the deserialise-error sum returned by
   `SSZ.deserialize`.
 * `Hasher/Class`, `Hasher/Sha256`, `Hasher/Sha256Spec` — the
-  `Hasher` typeclass and its two shipping instances.
-* `Hasher/Sha256Batch` — the batched FFI sibling-combine
-  primitive (`sha256BatchCombine`) used by the cache layer's
-  level-by-level builds.
+  `Hasher` typeclass and its two shipping instances. The FFI
+  `Sha256` instance delegates to the `LeanHazmatSha256` package
+  (`LeanHazmat.Sha256.sha256Hash` / `sha256Combine`); the bindings
+  themselves no longer live in SizzLean (hazmat-docs/ARCHITECTURE.md
+  §9), only the typeclass glue.
+* `Hasher/Sha256Batch` — the pure-Lean reference
+  (`sha256BatchCombineSpec`) and the `sha256BatchCombine_eq_spec`
+  axiom for the FFI batched sibling-combine
+  (`LeanHazmat.Sha256.sha256BatchCombine`).
 * `Hasher/Sha256Equiv` — the named FFI ≡ pure-Lean equivalence
   axioms (`sha256Hash_eq_spec`, `sha256Combine_eq_spec`;
-  `sha256BatchCombine_eq_spec` lives next to the batched
-  primitive in `Sha256Batch`), rewrite-targets for proofs that
-  need FFI hashes to reduce. The complete trust-boundary
-  inventory is recoverable via `grep -rEn '^axiom |^@\[extern\]'`
-  over `packages/SizzLean` — see the package README's
-  "Trust assumptions you can grep for" section.
+  `sha256BatchCombine_eq_spec` lives next to the reference def in
+  `Sha256Batch`), rewrite-targets for proofs that need FFI hashes to
+  reduce. The SizzLean-side trust-boundary inventory is recoverable
+  via `grep -rEn '^axiom '` over `packages/SizzLean` (the `@[extern]`
+  bindings live in `packages/LeanHazmatSha256`).
 * `Cache/TreeBacked` — `CachedSSZ`, the cached-only one-flavour
   type, with `CachedSSZ.ofValue` and `CachedSSZ.hashTreeRoot`.
 * `Cache/Box` — `SSZ.Box`, the closed union of cached + uncached

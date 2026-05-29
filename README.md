@@ -17,32 +17,41 @@ Upstream repository: <https://github.com/etheorem/etheorem>.
 ## Layout
 
 ```
-LeanSha256  ←  SizzLean  ←  LeanEthCS
-   (pure)      (SSZ +        (consensus
-               cache +       containers,
-               FFI hash)     Phase0…Gloas)
+LeanSha256 ─────────────┐
+                        ├─→ SizzLean  ←  LeanEthCS
+LeanHazmatSha256 ───────┘   (SSZ +        (consensus
+   (FFI SHA-256)            cache)        containers,
+                                          Phase0…Gloas)
+
+LeanHazmat* (FFI crypto family):  Sha256 · Bls · Kzg   (consumed à la carte)
 ```
 
-Three Lake subpackages under `packages/`, each with its own
-lakefile and independent build target:
+Lake subpackages under `packages/`, each with its own lakefile and
+independent build target:
 
 - **[`packages/LeanSha256/`](packages/LeanSha256/README.md)** — pure-Lean
-  SHA-256 reference. NIST CAVP-validated, kernel-reducible.
-  No FFI dependency.
+  SHA-256 reference. NIST CAVP-validated, kernel-reducible. No FFI.
 - **[`packages/SizzLean/`](packages/SizzLean/README.md)** — SSZ
-  library: spec types, serialization, deserialization,
-  Merkleization, the `SSZRepr` deriving handler, the cache layer,
-  the `sszUpdate` macro, plus the FFI-backed `Hasher Sha256`
-  instance (procedural Lake target builds `csrc/sha256_shim.c`).
+  library: spec types, serialization, deserialization, Merkleization,
+  the `SSZRepr` deriving handler, the cache layer, the `sszUpdate`
+  macro, plus the `Hasher` typeclass + `Sha256` instance (delegating to
+  the `LeanHazmatSha256` FFI binding) and the FFI ≡ spec equivalence
+  axioms — the one layer importing both the FFI binding and the spec.
 - **[`packages/LeanEthCS/`](packages/LeanEthCS/README.md)** —
   Ethereum consensus-spec containers from Phase 0 through Gloas,
   the preset-struct macro, and the `ssz_static` CLI runner
   (`eth_ssz_vector_runner`, driven by `scripts/run_conformance.py`).
+- **[`packages/LeanHazmat*/`](hazmat-docs/ARCHITECTURE.md)** — the FFI
+  crypto family: one package per primitive family wrapping a
+  battle-tested native library behind `@[extern]`. Consensus families
+  ship today — `LeanHazmatSha256` (OpenSSL), `LeanHazmatBls` (blst),
+  `LeanHazmatKzg` (c-kzg-4844), consumed à la carte. The aggregator
+  meta-packages (`LeanHazmatConsensus`, …) and execution-layer families
+  are deferred. See [`hazmat-docs/`](hazmat-docs/).
 
-The umbrella `lakefile.toml` declares no Lean libraries of its
-own — it just coordinates the three subpackages via
-`[[require]]` blocks. Per-package publication repos will exist
-later; this is a development monorepo.
+The umbrella `lakefile.toml` declares no Lean libraries of its own — it
+just coordinates the subpackages via `[[require]]` blocks. Per-package
+publication repos will exist later; this is a development monorepo.
 
 **Status: conformance-validated.** The Layer 1 spec
 (total serialize / deserialize / hashTreeRoot), the `SSZRepr`
@@ -169,25 +178,33 @@ toolchain via `leanprover/lean-action`.
 
 ### Native dependencies
 
-The FFI SHA-256 shim (`packages/SizzLean/csrc/sha256_shim.c`)
-links against OpenSSL's `libcrypto`. The Lake build expects:
+The FFI SHA-256 shim (`packages/LeanHazmatSha256/csrc/sha256_shim.c`,
+used by SizzLean's hash path) links against OpenSSL's `libcrypto`,
+discovered via `pkg-config` (Debian/Ubuntu fallback baked in). The Lake
+build expects:
 
-- **Linux (Debian/Ubuntu, including CI):** `libssl-dev` for the
-  headers (`/usr/include/openssl/evp.h`) and the versioned
-  `libcrypto.so.3` shared library. The Ubuntu CI runners
-  preinstall this package; on a fresh local checkout install via:
+- **Linux (Debian/Ubuntu, including CI):** `libssl-dev` for the headers
+  (`/usr/include/openssl/evp.h`) and the versioned `libcrypto.so.3`
+  shared library, plus `pkg-config`. Install via:
 
   ```bash
-  sudo apt-get install libssl-dev
+  sudo apt-get install libssl-dev pkg-config
   ```
 
-- **macOS:** `openssl@3` via Homebrew, plus the standard build
-  toolchain. (`packages/SizzLean/lakefile.lean` hardcodes the Linux
-  library path today; macOS support will land when the library
-  is in place.)
+- **macOS:** `openssl@3` + `pkg-config` via Homebrew (the `pkg-config`
+  discovery handles the keg-only include/lib paths).
 
-The C compiler is invoked through the Lean toolchain's `cc`
-wrapper — no separate configuration required.
+Run `just doctor-native` to verify the build-time native deps
+(`cc`, `git`, `pkg-config`, OpenSSL 3.x).
+
+**Vendored crypto (the LeanHazmat BLS / KZG families).** `LeanHazmatBls`
+(blst) and `LeanHazmatKzg` (c-kzg-4844) wrap *vendored* native libraries,
+fetched at pinned tags by `just vendor-bls` / `just vendor-kzg` into
+gitignored `vendor/` trees before `lake build` (never git submodules; see
+[`hazmat-docs/ARCHITECTURE.md`](hazmat-docs/ARCHITECTURE.md) §6). `just
+build` runs both vendor steps for you. The C / C++ compilers are invoked
+through the Lean toolchain's `cc` wrapper — no separate configuration
+required.
 
 ## Conformance harness
 

@@ -1,4 +1,5 @@
 import SizzLean.Hasher.Sha256
+import LeanHazmatSha256
 import SizzLean.Cache.MerkleTree.Node
 import SizzLean.Cache.MerkleTree.Merkle
 import SizzLean.Cache.MerkleTree.HashCons
@@ -38,7 +39,9 @@ set_option autoImplicit false
 namespace SizzLeanTests.HashConsCoherence
 
 open SizzLean.Cache.MerkleTree
-open SizzLean.Hasher
+-- `Sha256` (the FFI Hasher tag) from `SizzLean.Hasher`; the
+-- `sha256Combine` primitive from `LeanHazmat` (LeanHazmatSha256).
+open SizzLean.Hasher LeanHazmat.Sha256
 
 private def l : Node := .leaf (ByteArray.mk (Array.replicate 32 0xaa))
 private def r : Node := .leaf (ByteArray.mk (Array.replicate 32 0xbb))

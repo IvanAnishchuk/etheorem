@@ -22,9 +22,14 @@ default:
 # Build
 # ─────────────────────────────────────────────────────────────────────────
 
-# Compile all three libraries (LeanSha256 → SizzLean → LeanEthCS)
-build:
+# Compile every library. The vendored families (LeanHazmatBls,
+# LeanHazmatKzg) need their `vendor-*` recipes first; the dependencies
+# run them (idempotent) before building.
+build: vendor-bls vendor-kzg
     lake build LeanSha256
+    lake build LeanHazmatSha256
+    lake build LeanHazmatBls
+    lake build LeanHazmatKzg
     lake build SizzLean
     lake build LeanEthCS
 
@@ -72,6 +77,18 @@ doctor-native:
 
     echo "checking build-time native dependencies"
     echo
+
+    if command -v cc >/dev/null 2>&1; then
+      info "cc                ($(cc --version 2>&1 | head -1))"
+    else
+      miss "cc                (C compiler — builds the SHA-256 / blst FFI shims)"
+    fi
+
+    if command -v git >/dev/null 2>&1; then
+      info "git               ($(git --version 2>&1 | head -1))"
+    else
+      miss "git               (needed by \`just vendor-*\` to fetch vendored crypto sources)"
+    fi
 
     if command -v pkg-config >/dev/null 2>&1; then
       info "pkg-config        ($(pkg-config --version))"
@@ -167,12 +184,24 @@ doctor: doctor-native
     echo
     echo "all dev-time deps present"
 
-# All local tests — SHA-256 NIST CAVP + SSZ library gates + LeanEthCS compile-time validation
-test: test-sha256 test-ssz test-eth
+# All local tests — SHA-256 spec + FFI CAVP + BLS + KZG KATs + SSZ library gates + LeanEthCS compile-time validation
+test: test-sha256 test-sha256-hazmat test-bls test-kzg test-ssz test-eth
 
-# Full NIST CAVP byte-oriented SHA-256 vectors — 129 cases via native_decide, ~108s (the 3 anchor FIPS 180-4 §B gates already fire on `lake build LeanSha256` itself; this adds the full upstream suite)
+# Full NIST CAVP byte-oriented SHA-256 vectors against the pure-Lean SPEC — 129 cases via native_decide, ~108s (the 3 anchor FIPS 180-4 §B gates already fire on `lake build LeanSha256` itself; this adds the full upstream suite)
 test-sha256:
     lake build LeanSha256Tests
+
+# Full NIST CAVP byte-oriented SHA-256 vectors against the OpenSSL FFI shim (LeanHazmatSha256) — 129 cases + the combine/batch anchor KAT, all via native_decide
+test-sha256-hazmat:
+    lake build LeanHazmatSha256Tests
+
+# Consensus BLS Known-Answer-Tests against the blst FFI shim (LeanHazmatBls) — consensus-spec sign/verify anchors + self-contained aggregate round-trips. Needs `just vendor-bls` first (run via the dependency).
+test-bls: vendor-bls
+    lake build LeanHazmatBlsTests
+
+# KZG Known-Answer / round-trip tests against the c-kzg-4844 FFI shim (LeanHazmatKzg) — EIP-4844 commit/prove/verify + Fulu cell & recovery round-trips. Needs both vendor recipes (c-kzg builds against Bls's blst).
+test-kzg: vendor-bls vendor-kzg
+    lake build LeanHazmatKzgTests
 
 # `SizzLeanTests.PendingListShrink` Cases 4/5/7 deliberately drive
 # OOB `SSZList.set!` writes — `Array.set!` prints a panic message
@@ -279,12 +308,71 @@ official-ssz-vector-tests-all: official-ssz-vector-tests-generic-full official-s
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Vendoring — fetch native crypto sources for the LeanHazmat families.
+#
+# Each recipe shallow-clones a pinned tag into a gitignored `vendor/`
+# tree (hazmat-docs/ARCHITECTURE.md §6); the build itself stays offline.
+# Run the relevant `vendor-*` recipe once before `lake build` of a
+# vendored family (and as a CI step before the Lean build). Never a git
+# submodule — the pin lives here.
+# ─────────────────────────────────────────────────────────────────────────
+
+# blst pin: tag v0.3.16 (commit e7f90de5…). This is exactly the rev
+# c-kzg-4844 v2.1.7 expects for its blst submodule, so LeanHazmatKzg can
+# build c-kzg against THIS blst (hazmat-docs/ARCHITECTURE.md §4).
+blst_tag := "v0.3.16"
+
+# Vendor blst (BLS12-381) for LeanHazmatBls — shallow clone at the pinned tag
+vendor-bls:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="packages/LeanHazmatBls/vendor/blst"
+    if [ -d "$dir/.git" ]; then
+      echo "blst already vendored at $dir ($(git -C "$dir" describe --tags 2>/dev/null || echo unknown))"
+      exit 0
+    fi
+    rm -rf "$dir"
+    mkdir -p "$(dirname "$dir")"
+    git clone --depth 1 --branch "{{blst_tag}}" https://github.com/supranational/blst "$dir"
+    echo "vendored blst {{blst_tag}} -> $dir"
+
+# c-kzg-4844 pin: tag v2.1.7. Its blst submodule rev is exactly {{blst_tag}}
+# (the LeanHazmatBls pin), so LeanHazmatKzg builds c-kzg against
+# LeanHazmatBls's blst rather than vendoring a second copy (§4). Do NOT
+# fetch c-kzg's --recursive blst.
+ckzg_tag := "v2.1.7"
+
+# Vendor c-kzg-4844 (KZG / EIP-4844) for LeanHazmatKzg — shallow clone, no submodules
+vendor-kzg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="packages/LeanHazmatKzg/vendor/c-kzg-4844"
+    if [ -d "$dir/.git" ]; then
+      echo "c-kzg already vendored at $dir ($(git -C "$dir" describe --tags 2>/dev/null || echo unknown))"
+      exit 0
+    fi
+    rm -rf "$dir"
+    mkdir -p "$(dirname "$dir")"
+    # No --recursive: c-kzg's bundled blst is deliberately NOT fetched; we
+    # build against LeanHazmatBls's blst (hazmat-docs/ARCHITECTURE.md §4).
+    git clone --depth 1 --branch "{{ckzg_tag}}" https://github.com/ethereum/c-kzg-4844 "$dir"
+    # The trusted setup is embedded into the shim at build time from
+    # data/trusted_setup.txt; refresh that committed copy from the pin.
+    cp "$dir/src/trusted_setup.txt" packages/LeanHazmatKzg/data/trusted_setup.txt
+    echo "vendored c-kzg {{ckzg_tag}} -> $dir (trusted setup copied to data/)"
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Code generation (maintenance — re-run when upstream sources change)
 # ─────────────────────────────────────────────────────────────────────────
 
-# Re-generate the NIST CAVP vector table from `packages/LeanSha256/cavp/*.rsp`
+# Re-generate the NIST CAVP vector table (pure-Lean spec) from `packages/LeanSha256/cavp/*.rsp`
 gen-cavp:
     .venv/bin/python packages/LeanSha256/scripts/gen_sha256_cavp.py
+
+# Re-generate the NIST CAVP vector table (OpenSSL FFI shim) from `packages/LeanHazmatSha256/cavp/*.rsp`. Stdlib-only Python; no .venv needed.
+gen-cavp-hazmat:
+    python3 packages/LeanHazmatSha256/scripts/gen_cavp.py
 
 # Re-generate the CLI dispatch table (writes to LeanEthCS Cli/Main.lean)
 gen-cli-dispatch:
