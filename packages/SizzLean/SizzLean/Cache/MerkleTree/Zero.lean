@@ -1,5 +1,6 @@
 import SizzLean.Hasher.Class
 import SizzLean.Hasher.Sha256
+import LeanHazmatSha256
 import SizzLean.Cache.MerkleTree.Node
 
 /-!
@@ -11,7 +12,7 @@ materialise `zeroLeaf d` (the right-sibling subtree at any
 depth when `setAt` walks past a not-yet-filled position).
 
 The table is **memoised once at module load** into a private
-`IO.Ref`, populated by direct calls to `SizzLean.Hasher.sha256Combine`
+`IO.Ref`, populated by direct calls to `LeanHazmat.Sha256.sha256Combine`
 (the FFI primitive — no `Hasher.combine` typeclass dispatch). The
 public accessor `zeroHashAt` reads from the memo via `unsafeBaseIO`;
 the ref is set-once-at-init and never mutated after, so the access is
@@ -26,9 +27,9 @@ refers to.
 
 The recurrence
     `Z[0] = zero32`
-    `Z[d+1] = sha256Combine Z[d] Z[d]`
+    `Z[d+1] = LeanHazmat.Sha256.sha256Combine Z[d] Z[d]`
 is structural recursion on `Nat`. Each level is computed once at
-module load via the FFI `lean_ssz_sha256_combine` shim; subsequent
+module load via the FFI `lean_hazmat_sha256_combine` shim; subsequent
 `zeroHashAt _ d` calls are O(1) Vector indexes into the memo.
 
 `Vector.get` with a `Fin 65` index is total; the `zeroHashAt`
@@ -41,10 +42,10 @@ proofs at every call site.
 
 The `unsafeBaseIO` accessor for the memo adds one implementation-
 defined trust assumption: the `initialize` block runs before any
-reader. This is parallel to (and same trust class as) the existing
-`@[extern] opaque sha256Combine` declaration; both are validated
-by the `Sha256Equivalence` test suite re-running the recurrence
-against the pure-Lean reference.
+reader. This is parallel to (and same trust class as) the
+`@[extern] opaque LeanHazmat.Sha256.sha256Combine` declaration; both are
+validated by the `Sha256Equivalence` test suite re-running the
+recurrence against the pure-Lean reference.
 -/
 
 set_option autoImplicit false
@@ -68,14 +69,14 @@ private def zero32 : ByteArray :=
 
 /-- Pure recurrence for the depth-`d` Sha256 zero-hash. Used only
 at module-load time to populate the memoised table — no runtime
-callers. Calls `SizzLean.Hasher.sha256Combine` (the FFI primitive)
+callers. Calls `LeanHazmat.Sha256.sha256Combine` (the FFI primitive)
 directly rather than going through `Hasher.combine`'s typeclass
 dispatch, since the memo is intentionally Sha256-specific. -/
 private def zeroHashRec : Nat → ByteArray
   | 0     => zero32
   | d + 1 =>
       let z : ByteArray := zeroHashRec d
-      sha256Combine z z
+      LeanHazmat.Sha256.sha256Combine z z
 
 /-- The depth-indexed zero-hash table, lazily populated at module
 load. Held inside an `IO.Ref` so the 65-entry vector is computed

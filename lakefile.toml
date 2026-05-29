@@ -1,22 +1,52 @@
 name = "Etheorem"
 
-# Umbrella package coordinating the three subpackages. It declares
-# no Lean library of its own — building the umbrella delegates to
-# the sub-packages via the `[[require]]` blocks below.
+# Umbrella package coordinating the subpackages. It declares no Lean
+# library of its own — building the umbrella delegates to the
+# sub-packages via the `[[require]]` blocks below.
 #
 # Common targets (build by name from the repo root):
 #   lake build LeanSha256
+#   lake build LeanHazmatSha256        # consensus crypto — FFI families
+#   lake build LeanHazmatBls           #   (need `just vendor-bls` / `vendor-kzg`)
+#   lake build LeanHazmatKzg
 #   lake build SizzLean
 #   lake build LeanEthCS
 #   lake build SizzLeanTests
-#   lake build LeanEthCS
+#   lake build LeanHazmatSha256Tests / LeanHazmatBlsTests / LeanHazmatKzgTests
 #   lake build eth_ssz_vector_runner          # CLI exe for ssz_static + ssz_generic tests
 #
 # Or per-package: `cd packages/<Name> && lake build`.
+# The LeanHazmat aggregator meta-packages (LeanHazmatConsensus,
+# LeanHazmatExecution, top LeanHazmat umbrella) + the execution-layer
+# families are deferred (see hazmat-docs/PLAN.md).
 
 [[require]]
 name = "LeanSha256"
 path = "packages/LeanSha256"
+
+# LeanHazmat — FFI crypto family (hazmat-docs/ARCHITECTURE.md).
+# Consensus families ship first; execution-layer families are deferred.
+# SHA-256 leads: it needs no vendoring, so it de-risks the per-family
+# model. `SizzLean` requires it for the FFI hash path.
+[[require]]
+name = "LeanHazmatSha256"
+path = "packages/LeanHazmatSha256"
+
+# BLS12-381 (blst, vendored). Needs `just vendor-bls` before `lake build`.
+# Single blst owner for the family — LeanHazmatKzg shares this blst.
+[[require]]
+name = "LeanHazmatBls"
+path = "packages/LeanHazmatBls"
+
+# KZG / EIP-4844 + Fulu (c-kzg-4844, vendored against LeanHazmatBls's blst).
+# Needs `just vendor-bls` AND `just vendor-kzg` before `lake build`.
+[[require]]
+name = "LeanHazmatKzg"
+path = "packages/LeanHazmatKzg"
+
+# (The LeanHazmatConsensus aggregator over the three families is deferred —
+# YAGNI until a consumer needs a whole crypto layer in one require; see
+# hazmat-docs/PLAN.md Stage 4. The families are consumed à la carte today.)
 
 [[require]]
 name = "SizzLean"

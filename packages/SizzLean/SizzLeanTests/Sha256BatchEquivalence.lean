@@ -1,4 +1,4 @@
-import SizzLean.Hasher.Sha256
+import LeanHazmatSha256
 import SizzLean.Hasher.Sha256Batch
 import LeanSha256.Core
 
@@ -37,7 +37,10 @@ set_option maxHeartbeats 800000
 
 namespace SizzLeanTests.Sha256BatchEquivalence
 
-open SizzLean.Hasher
+-- `sha256BatchCombine` is the FFI primitive (in `LeanHazmatSha256`);
+-- `sha256BatchCombineSpec` is the pure-Lean reference (kept in
+-- `SizzLean.Hasher.Sha256Batch` next to the equivalence axiom).
+open LeanHazmat.Sha256 SizzLean.Hasher
 
 private def z32 : ByteArray := ByteArray.mk (Array.replicate 32 0)
 private def one32 : ByteArray := ByteArray.mk (Array.replicate 32 1)

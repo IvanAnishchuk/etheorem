@@ -1,6 +1,5 @@
 import SizzLeanTests.ReprExamples
 import SizzLeanTests.SetAtRandom
-import SizzLeanTests.Sha256Vectors
 import SizzLeanTests.Sha256Equivalence
 import SizzLeanTests.ExampleContainers
 import SizzLeanTests.TreeBackedCoherence
@@ -30,9 +29,15 @@ lake build SizzLeanTests
 
 ## What's here
 
-* **SHA-256 conformance** — NIST CAVP `byte` & `long-byte` vectors
-  (`Sha256Vectors.lean`), FFI-vs-spec hasher equivalence
-  (`Sha256Equivalence.lean`).
+* **SHA-256 FFI ≡ spec equivalence** — `Sha256Equivalence.lean`
+  (scalar `hash` / `combine`) and `Sha256BatchEquivalence.lean`
+  (batched combine). These are the cross-checks that need *both* the
+  FFI binding (`LeanHazmatSha256`) and the pure-Lean spec
+  (`LeanSha256`), so they live here rather than in either package's
+  own test lib. They are the empirical evidence behind SizzLean's
+  `sha256{Hash,Combine,BatchCombine}_eq_spec` axioms. The pure
+  byte-level CAVP KAT of the FFI shim (the FFI ≡ NIST direction) lives
+  in `LeanHazmatSha256Tests`.
 * **Tree machinery** — `Node.setAt` and `Node.setManyAt` PRNG
   property tests (`SetAtRandom.lean`).
 * **Cache machinery on example containers** — `TreeBacked`
