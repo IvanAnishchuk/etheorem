@@ -14,44 +14,32 @@ an `SSZ.Box H T` argument and pattern-matches; the `sszUpdate`
 macro recognises the type and expands to a two-arm match
 automatically.
 
-## Why an inductive, not a typeclass
+## A closed two-constructor sum
 
-A typeclass `SSZCaching H T C` abstracting over the two cache
-shapes via instance dispatch can carry *observational* code
-(reading the view, computing the root) but cannot drive
-`sszUpdate` cleanly: doing so requires a Merkle-shaped `Patch`
-field on the class that would leak the cache implementation into
-the public API. The inductive `Box` keeps the same dispatch closed:
+`Box` is a plain inductive with exactly two constructors, so the set
+of cache flavours is *closed* and dispatch is resolved at compile
+time:
 
-* The two constructors enumerate the *entire* design space — no
-  third-party `SSZCaching` instance can sneak in, so the
-  `sszUpdate` elaborator's two-arm match handles every case at
-  compile time.
-* No `outParam` machinery, no instance resolution dance — just an
-  ordinary inductive type with two constructors. (`outParam` is
-  the marker on a typeclass parameter that lets instance synthesis
-  *infer* one type from another — e.g. `HAdd α β γ` with `γ` as
-  `outParam` so the addition's result type is determined by the
-  two operands. Useful when overload resolution would otherwise
-  loop; unnecessary here.)
+* The two constructors enumerate the entire design space, so the
+  `sszUpdate` elaborator's two-arm match is exhaustive — every call
+  site is handled at compile time, with no instance-resolution
+  machinery in the way.
+* Dispatch exposes no Merkle-shaped `Patch` field in a public
+  interface: each arm rewrites a *concrete* cache type, so the cache
+  representation never leaks past the `Box`.
 * `sszUpdate s with f := v` on an `SSZ.Box H T` expands to:
     `match s with`
     `| .cached t   => .cached (sszUpdate t with f := v)`
     `| .uncached t => .uncached (sszUpdate t with f := v)`
-  Each arm's inner `sszUpdate` resolves on a *concrete* cache type
-  (the existing per-flavour emission paths), so the cached arm
-  keeps its O(log N) spine-sharing update and the uncached arm
-  keeps its trivial struct rewrite. No `Patch` indirection
-  needed.
+  so the cached arm keeps its O(log N) spine-sharing update and the
+  uncached arm keeps its trivial struct rewrite.
 
 ## Trade-off
 
-The set of cache flavours is closed by design. A new flavour
-(hash-consed, deferred-update overlay, …) would mean editing the
-`Box` inductive plus the `sszUpdate` macro's box-emission arm.
-Production and proof are the two flavours required, and ruling
-out other configurations at the type level avoids carrying the
-open-typeclass machinery for one of them.
+The flavour set is closed by design: a new flavour would mean adding
+a constructor to `Box` plus an arm to the `sszUpdate` box emission.
+Production (cached) and proof (uncached) are the two required, and
+fixing them at the type level keeps the dispatch exhaustive.
 
 ## Smart-constructor naming
 

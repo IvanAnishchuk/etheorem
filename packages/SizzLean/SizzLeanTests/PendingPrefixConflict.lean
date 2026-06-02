@@ -160,12 +160,12 @@ elements. The element write is dropped by the vector-write's
 whole-replacement at the `rootsA` subtree level. -/
 example :
     let t  : TreeBacked Sha256 BatchExample := TreeBacked.ofValue Sha256 b0
-    let t1 := sszUpdate t  with rootsA    := newVec
-    let t2 := sszUpdate t1 with rootsA[0] := Vector.replicate 32 0xee
+    let t1 := sszUpdate t with rootsA := newVec
     let expected : BatchExample :=
       { rootsA := newVec.set 0 (Vector.replicate 32 0xee)
         rootsB := b0.rootsB }
-    t2.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 expected := by
+    (sszUpdate t1 with rootsA[0] := Vector.replicate 32 0xee).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 expected) := by
   native_decide
 
 end SizzLeanTests.PendingPrefixConflict

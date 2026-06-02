@@ -19,7 +19,9 @@ writes are sitting in `pending`. The reader (`hashTreeRootCached`)
 calls `commit` first, so the cache-vs-spec coherence is upheld at
 read time.
 
-Six cases on the existing example containers:
+Cases 1–6 cover field and composite-element-index writes; cases
+7–9 cover *basic-packed* element indices (the owner-rebuild path).
+The first six:
 
 1. *zero writes* — `ofValue` then root; sanity check that the
    pending field starts empty.
@@ -105,16 +107,16 @@ example :
 
 example :
     let t  : TreeBacked Sha256 BatchExample := TreeBacked.ofValue Sha256 b0
-    let t' := sszUpdate t with
-      rootsA[0] := Vector.replicate 32 0xa0,
-      rootsA[1] := Vector.replicate 32 0xa1,
-      rootsA[2] := Vector.replicate 32 0xa2
     let expected : BatchExample :=
       { rootsA := b0.rootsA |>.set 0 (Vector.replicate 32 0xa0)
                             |>.set 1 (Vector.replicate 32 0xa1)
                             |>.set 2 (Vector.replicate 32 0xa2)
         rootsB := b0.rootsB }
-    t'.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 expected := by
+    (sszUpdate t with
+      rootsA[0] := Vector.replicate 32 0xa0,
+      rootsA[1] := Vector.replicate 32 0xa1,
+      rootsA[2] := Vector.replicate 32 0xa2).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 expected) := by
   native_decide
 
 /-! ## Case 5 — write-then-overwrite across statements -/
@@ -153,6 +155,45 @@ example :
     let s2 := sszUpdate s1 with versionB := Vector.replicate 4 0xad
     let s3 := sszUpdate s2 with marker   := 0xbeef
     oneShot.hashTreeRootCached.1 = s3.hashTreeRootCached.1 := by
+  native_decide
+
+/-! ## Packed basic-element indices
+
+`versionA : Vector UInt8 4` has a *basic packed* element type:
+several elements share one 32-byte chunk, so the element has no
+Merkle sub-tree of its own. `sszUpdate t with versionA[i] := v`
+therefore rebuilds the whole `versionA` field's subtree from the
+index-updated view (the `projDrop` path in `walkPath`) rather than
+keying a per-element write. These cases pin that this stays
+byte-identical to recomputing the root from the updated value. -/
+
+/-! ## Case 7 — packed index into a single-chunk byte vector -/
+
+example :
+    let t  : TreeBacked Sha256 FlatExample := TreeBacked.ofValue Sha256 f0
+    (sszUpdate t with versionA[2] := 0xde).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 ({ f0 with versionA := f0.versionA.set 2 0xde } : FlatExample)) := by
+  native_decide
+
+/-! ## Case 8 — packed index into a multi-chunk byte vector
+(`Vector UInt8 96` spans 3 chunks; the write lands in the middle one). -/
+
+example :
+    let t  : TreeBacked Sha256 NestedExample := TreeBacked.ofValue Sha256 n0
+    (sszUpdate t with signature[40] := 0x55).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 ({ n0 with signature := n0.signature.set 40 0x55 } : NestedExample)) := by
+  native_decide
+
+/-! ## Case 9 — composite index *then* packed index (`rootsA[3][5]`):
+the outer composite element keeps its element-gindex + bounds check,
+the inner packed byte triggers the owner-rebuild of `rootsA[3]`. -/
+
+example :
+    let t  : TreeBacked Sha256 BatchExample := TreeBacked.ofValue Sha256 b0
+    let expected : BatchExample :=
+      { b0 with rootsA := b0.rootsA.set 3 ((b0.rootsA[3]).set 5 0x77) }
+    (sszUpdate t with rootsA[3][5] := 0x77).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 expected) := by
   native_decide
 
 end SizzLeanTests.PendingOverlayCoherence

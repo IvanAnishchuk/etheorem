@@ -140,9 +140,9 @@ This file lives under `SizzLean/Cache/` alongside its sibling
 `Cache/Uncached.lean`. The two are parallel implementations of the
 cache abstraction: `TreeBacked` is the Merkle-cached production
 flavour; `UncachedSSZ` is the pure-Lean proof-friendly flavour.
-The shared `SSZCaching` class lives in `Cache/Class.lean`, and the
-`sszUpdate t with …` syntax (`Cache/Update.lean`) elaborates to a
-per-flavour optimal emission. -/
+`SSZ.Box` (`Cache/Box.lean`) is the closed sum that unifies the two
+flavours, and the `sszUpdate t with …` syntax (`Cache/Update.lean`)
+elaborates to a per-flavour optimal emission. -/
 
 set_option autoImplicit false
 

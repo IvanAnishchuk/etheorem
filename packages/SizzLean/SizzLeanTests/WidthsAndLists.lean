@@ -416,25 +416,25 @@ example :
 Vector-of-`ExRoot` (composite element) index syntax. -/
 example :
     let t : TreeBacked Sha256 WidthsExample := TreeBacked.ofValue Sha256 w0
-    let t' := sszUpdate t with vec[2] := mk 0x77
     let expected : WidthsExample :=
       { w0 with vec := w0.vec.set 2 (mk 0x77) (by decide) }
-    t'.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 expected := by
+    (sszUpdate t with vec[2] := mk 0x77).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 expected) := by
   native_decide
 
 /-- Vector index write + width write + list resize in one
 statement — three different shape paths in one commit. -/
 example :
     let t : TreeBacked Sha256 WidthsExample := TreeBacked.ofValue Sha256 w0
-    let t' := sszUpdate t with
-      vec[0] := mk 0x88,
-      qword  := 0xbeef,
-      lst    := fullLst
     let expected : WidthsExample :=
       { w0 with vec := w0.vec.set 0 (mk 0x88) (by decide),
                 qword := 0xbeef,
                 lst := fullLst }
-    t'.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 expected := by
+    (sszUpdate t with
+      vec[0] := mk 0x88,
+      qword  := 0xbeef,
+      lst    := fullLst).toOption.map (·.hashTreeRootCached.1)
+      = some (SSZ.hashTreeRoot Sha256 expected) := by
   native_decide
 
 end SizzLeanTests.WidthsAndLists

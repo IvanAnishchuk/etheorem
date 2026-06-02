@@ -5,6 +5,7 @@ import SizzLean.Repr.Instances
 import SizzLean.Cache.TreeBacked
 import SizzLean.Cache.Uncached
 import SizzLean.Cache.Box
+import SizzLean.Cache.IndexError
 
 /-!
 # `SizzLean.Cache.Update` — `sszUpdate t with …` surface syntax
@@ -42,11 +43,10 @@ The elaborator inspects `t`'s type at expansion time and emits
   even reject basic-packed element indexing (a restriction that
   only matters when there's a Merkle leaf to re-encode).
 
-Anything else is a type error at the macro call site. In
-particular, abstract cache types (e.g. inside a function generic
-over `[SSZCaching H T C]`) are not handled by this macro — the
-typeclass exposes only read-side methods (`ofValue`, `view`,
-`hashTreeRoot`); cache-generic *mutation* code is out of scope.
+Anything else is a type error at the macro call site. There is no
+caching *typeclass* to be generic over: flavour-generic code takes a
+concrete `SSZ.Box H T` and relies on this macro's two-arm dispatch
+(see `Cache/Box.lean` for why a class can't drive `sszUpdate`).
 Specialise the function to a concrete cache type at the call site
 if you need `sszUpdate`-style ergonomics.
 
@@ -125,35 +125,28 @@ and emits `gindexBits (base + i)` as a *runtime* piece of the
 bits-list expression. The view side calls `Vector.set!` /
 `SSZList.set!` regardless of cache flavour.
 
-## What's *not* supported on the cached path: basic-packed elements
+## Basic-packed element indices: supported, at owner-rebuild cost
 
-The macro rejects `sszUpdate t with vec[i] := v` *on the cached
-path* at expansion time if `vec`'s element type is basic and packs
-multiple-elements-per-chunk (e.g. `Vector UInt64 n`, `SSZList Gwei
-n`). Updating one element in a packed chunk requires reading the
-neighbouring elements from the view and re-encoding the whole
-32-byte chunk — a path this macro doesn't ship.
+`sszUpdate t with vec[i] := v` where `vec`'s element type is basic
+and packs multiple-elements-per-chunk (e.g. `Vector UInt64 n`,
+`SSZList Gwei cap`) works on every flavour. A packed element shares
+a 32-byte chunk with its neighbours and has no Merkle sub-tree of
+its own, so the cached path cannot key a `PendingWrite` at an element
+gindex. Instead it points the write at the *owning* field's gindex
+and rebuilds that whole field's subtree from the index-updated
+`view` (the `projDrop` mechanism in `walkPath`). This is
+byte-identical to the manual whole-field replacement
+`sszUpdate t with vec := t.view.vec.set! i v` — the macro just writes
+it for you. The uncached path handles it with the same plain
+`{ view := { … with vec := vec.set! i v } }` rewrite it uses for
+everything.
 
-The uncached path has no such restriction (no chunk to re-encode);
-basic-packed indexing on `UncachedSSZ H T` works as expected.
-
-**Workaround on the cached path**: whole-vector / whole-list
-replacement. Compute the updated value at the value level with
-`.set!` on the view, then assign the whole field:
-
-```lean
--- ❌ Rejected on the cached path:
---    sszUpdate (cached : CachedSSZ H State) with balances[i] := newBal
-
--- ✅ Works (cached path): rebuilds the whole `balances` field's
--- sub-Merkle-tree.
-sszUpdate cached with balances := cached.view.balances.set! i newBal
-```
-
-Cost: `Node.ofShape` rebuilds the *entire* `balances`
-sub-Merkle-tree on each call — O(cap) merkleization rather than
-O(log cap). Fine for one-off updates; impractical for
-state-transition loops on the cached path.
+Cost (cached path only): rebuilding the owning field's subtree is
+O(field-chunks) merkleization, not the O(log cap) of a single-leaf
+update. Fine for occasional writes; for tight per-element loops
+(reward/penalty sweeps over `balances`) a true single-chunk re-encode
+path would still be needed. Composite-element and whole-field updates
+keep their O(log N) behaviour.
 
 ## Decisions
 
@@ -168,9 +161,12 @@ state-transition loops on the cached path.
   decide between the two emission paths. That requires `elabTerm`
   / `inferType` on the base, which is a `TermElabM` capability.
 * **Per-cache-type emission, not typeclass dispatch.** Each cache
-  type gets its specialised optimal emission. The `SSZCaching`
-  typeclass (in `Cache/Class.lean`) is for cross-cache *read* code
-  only; mutation lives here, in the macro, and is concrete-only.
+  type gets its specialised optimal emission, and `SSZ.Box`'s closed
+  two-constructor sum makes the cross-flavour case a compile-time
+  two-arm match. There is deliberately no caching *typeclass*: a
+  class abstracting the two flavours could carry read-side methods
+  but couldn't drive `sszUpdate` without leaking a Merkle `Patch`
+  field into its public API (see `Cache/Box.lean`).
 -/
 
 set_option autoImplicit false
@@ -244,10 +240,51 @@ private partial def appendSszGetSegments
   else
     return e
 
+/-- Lift the `Option` result of a checked element access into the
+`Except IndexError` that index-form `sszGet`/`sszUpdate` return: `none`
+(index out of range) becomes `.indexError`. -/
+def optErr {α : Type} : Option α → Except IndexError α
+  | some a => .ok a
+  | none   => .error .indexError
+
+/-- True when a `sszGet`/`sszUpdate` path contains an index segment
+`[i]` — the only forms that can go out of bounds, hence the only ones
+that return `Except`. -/
+private def segsHaveIndex (segs : Array (TSyntax `sszUpdateSegment)) : Bool :=
+  segs.any (fun seg => seg.raw.getKind == ``sszUpdateSegmentIndex)
+
+/-- `Except`-threading variant of `appendSszGetSegments`. Walks the
+path keeping the access *pure* until the first index, then switches to
+`Option` (`[i]?` / `.bind` / `.map`); the final `Option` is lifted to
+`Except IndexError` via `optErr`. Any field accesses after an index ride
+on `Option.map`. -/
+private partial def appendSszGetExceptAux
+    (e : Lean.TSyntax `term) (inOption : Bool)
+    (segs : Array (Lean.TSyntax `sszUpdateSegment)) (i : Nat) :
+    Lean.MacroM (Lean.TSyntax `term) := do
+  if h : i < segs.size then
+    let seg := segs[i]
+    match seg with
+    | `(sszUpdateSegment| .$f:ident) =>
+        let e' ← if inOption then `(($e).map (fun __x => __x.$f)) else `(($e).$f)
+        appendSszGetExceptAux e' inOption segs (i + 1)
+    | `(sszUpdateSegment| [$j:term]) =>
+        let e' ← if inOption then `(($e).bind (fun __x => __x[$j]?)) else `(($e)[$j]?)
+        appendSszGetExceptAux e' true segs (i + 1)
+    | _ => Macro.throwError s!"sszGet: malformed path segment {seg}"
+  else
+    if inOption then `(_root_.SizzLean.Cache.optErr $e) else pure e
+
 macro_rules
   | `(sszGet $base $head:ident $segs:sszUpdateSegment*) => do
-      let init : Lean.TSyntax `term ← `(($base).view.$head)
-      appendSszGetSegments init segs 0
+      if segsHaveIndex segs then
+        -- Index form: out-of-range reads reject, matching `IndexError`.
+        appendSszGetExceptAux (← `(($base).view.$head)) false segs 0
+      else
+        -- Field-only form: pure, reduces for `rfl`/`decide` exactly as
+        -- a hand-written `.view.path`.
+        let init : Lean.TSyntax `term ← `(($base).view.$head)
+        appendSszGetSegments init segs 0
 
 /-- Which cache flavour the macro is targeting. The elaborator
 picks this from the base term's type and branches the emission. -/
@@ -331,17 +368,25 @@ Each `PathStep.field n` contributes a *literal* bit-list piece
 is still compile-time-known. List elements get an extra leading
 `[false]` for the mix-in-length wrap.
 
-Element-typed vectors / lists where the element type is *basic*
-(packed multi-elements-per-chunk) are rejected at expansion time —
-those need a chunk-rebuild path that this macro doesn't ship. The
-typical Eth-spec workloads (vectors of `Root`, of composite
-containers, etc.) all hit the composite-element branch. -/
+Composite-element vectors / lists descend into the element's own
+sub-tree (`gindexBits (base + i)`). Basic *packed* element indices
+(`Vector UInt64 n`, `SSZList Gwei cap`, …) have no per-element
+sub-tree, so the walk instead targets the *owning* field's gindex,
+keeps that field as the terminal type, and returns `projDrop := 1`
+— asking the caller to rebuild the whole field's subtree from the
+index-updated `view` (see the module docstring's owner-rebuild
+note). -/
 private def walkPath (rootT : Name) (path : Array PathStep) :
-    TermElabM (Array BitsPiece × Expr) := do
+    TermElabM (Array BitsPiece × Expr × Nat) := do
   if path.isEmpty then throwError "sszUpdate: empty path"
   let mut curType : Expr := mkConst rootT
   let mut pieces : Array BitsPiece := #[]
   let mut terminalType? : Option Expr := none
+  -- Trailing path steps the *caller* should drop when projecting the
+  -- closure's sub-value: `1` for a packed-basic index terminal, whose
+  -- gindex targets the owning field rather than the element (see the
+  -- `.index` arm and the module docstring's owner-rebuild note).
+  let mut projDrop : Nat := 0
   for hi : i in [0 : path.size] do
     let step := path[i]'hi.upper
     let isLast := i + 1 == path.size
@@ -369,40 +414,63 @@ private def walkPath (rootT : Name) (path : Array PathStep) :
         else
           curType := fieldType
     | .index iStx =>
-        let mut elemType : Expr := default
-        if curType.isAppOfArity ``SizzLean.Repr.SSZList 2 then
-          let cap := curType.appArg!
-          let α := curType.appFn!.appArg!
-          let some capVal ← (Lean.Meta.evalNat (← whnf cap)).run
-            | throwError "sszUpdate: cannot evaluate list cap '{cap}' to a Nat"
-          unless ← isCompositeElem α do
-            throwError "sszUpdate: index syntax on `SSZList` with basic packed element type is not supported on the cached path"
-          pieces := pieces.push (.literal [false])
-          let base : Nat := 2 ^ SizzLean.Spec.chunkDepth capVal
-          let baseSyn : TSyntax `term := Syntax.mkNumLit (toString base)
-          pieces := pieces.push <| .runtime <|
-            ← `(_root_.SizzLean.Cache.MerkleTree.gindexBits ($baseSyn + $iStx))
-          elemType := α
-        else if curType.isAppOfArity ``Vector 2 then
-          let n := curType.appArg!
-          let α := curType.appFn!.appArg!
-          let some nVal ← (Lean.Meta.evalNat (← whnf n)).run
-            | throwError "sszUpdate: cannot evaluate vector length '{n}' to a Nat"
-          unless ← isCompositeElem α do
-            throwError "sszUpdate: index syntax on `Vector` with basic packed element type is not supported on the cached path — use whole-vector replacement instead"
-          let base : Nat := 2 ^ SizzLean.Spec.chunkDepth nVal
-          let baseSyn : TSyntax `term := Syntax.mkNumLit (toString base)
-          pieces := pieces.push <| .runtime <|
-            ← `(_root_.SizzLean.Cache.MerkleTree.gindexBits ($baseSyn + $iStx))
-          elemType := α
+        -- Composite-element index: descend into the element's own
+        -- sub-tree (gindex `base + i`). Basic *packed* element: the
+        -- element shares a 32-byte chunk with its neighbours and has
+        -- no sub-tree of its own, so we can't key a write at an
+        -- element gindex. Instead point the write at the *owning*
+        -- field (the bits accumulated so far already reach it),
+        -- keep the terminal type as that field, and ask the caller
+        -- via `projDrop := 1` to rebuild the whole field's subtree
+        -- from the index-updated view. Byte-identical to the manual
+        -- whole-field workaround, just automatic.
+        -- Resolve the container head. Prefer the *surface* type so a
+        -- direct `SSZList α cap` matches without unfolding (`whnf` would
+        -- reduce the `SSZList` def all the way to its `Subtype` and lose
+        -- the head); fall back to `whnf` only for abbreviation-wrapped
+        -- field types (e.g. `Bytes32`/`ExVersion` → `Vector …`), where
+        -- `Vector` is a structure so `whnf` stops at it.
+        let curTypeW ←
+          if curType.isAppOfArity ``SizzLean.Repr.SSZList 2
+              || curType.isAppOfArity ``Vector 2 then
+            pure curType
+          else
+            whnf curType
+        if curTypeW.isAppOfArity ``SizzLean.Repr.SSZList 2 then
+          let α := curTypeW.appFn!.appArg!
+          if ← isCompositeElem α then
+            let some capVal ← (Lean.Meta.evalNat (← whnf curTypeW.appArg!)).run
+              | throwError "sszUpdate: cannot evaluate list cap to a Nat"
+            pieces := pieces.push (.literal [false])
+            let base : Nat := 2 ^ SizzLean.Spec.chunkDepth capVal
+            let baseSyn : TSyntax `term := Syntax.mkNumLit (toString base)
+            pieces := pieces.push <| .runtime <|
+              ← `(_root_.SizzLean.Cache.MerkleTree.gindexBits ($baseSyn + $iStx))
+            if isLast then terminalType? := some α else curType := α
+          else
+            unless isLast do
+              throwError "sszUpdate: cannot index past a basic packed element '{α}'"
+            terminalType? := some curTypeW
+            projDrop := 1
+        else if curTypeW.isAppOfArity ``Vector 2 then
+          let α := curTypeW.appFn!.appArg!
+          if ← isCompositeElem α then
+            let some nVal ← (Lean.Meta.evalNat (← whnf curTypeW.appArg!)).run
+              | throwError "sszUpdate: cannot evaluate vector length to a Nat"
+            let base : Nat := 2 ^ SizzLean.Spec.chunkDepth nVal
+            let baseSyn : TSyntax `term := Syntax.mkNumLit (toString base)
+            pieces := pieces.push <| .runtime <|
+              ← `(_root_.SizzLean.Cache.MerkleTree.gindexBits ($baseSyn + $iStx))
+            if isLast then terminalType? := some α else curType := α
+          else
+            unless isLast do
+              throwError "sszUpdate: cannot index past a basic packed element '{α}'"
+            terminalType? := some curTypeW
+            projDrop := 1
         else
           throwError "sszUpdate: index `[…]` requires the current type to be `Vector` or `SSZList`, got {curType}"
-        if isLast then
-          terminalType? := some elemType
-        else
-          curType := elemType
   let some ty := terminalType? | throwError "sszUpdate: walk produced no terminal type"
-  return (pieces, ty)
+  return (pieces, ty, projDrop)
 where
   isCompositeElem (α : Expr) : MetaM Bool := do
     let αW ← whnf α
@@ -450,7 +518,7 @@ private def nestedViewUpdate (vPrev : TSyntax `term) (path : Array PathStep)
           let projIdent := mkIdent n
           ownerStx ← `(($ownerStx).$projIdent:ident)
       | .index i =>
-          ownerStx ← `(($ownerStx).get! $i)
+          ownerStx ← `(($ownerStx)[$i]!)
     match step with
     | .field n =>
         let lastIdent := mkIdent n
@@ -550,6 +618,35 @@ private def buildViewLetChain
     body ← `(let $vCur:ident := $updateRHS; $body)
   `(let $(mkVName 0):ident := t₀.view; $body)
 
+/-- A path step that is an index `[i]` (vs a field `.f`). -/
+private def isIdxStep : PathStep → Bool
+  | .index _ => true
+  | .field _ => false
+
+/-- Whether any clause has an index segment — the only forms that can
+go out of bounds, hence the only ones whose `sszUpdate` returns
+`Except IndexError _` rather than the bare cache value. -/
+private def clausesHaveIndex (clauses : Array Syntax) : Bool :=
+  clauses.any (fun c => (parseClause c).1.any isIdxStep)
+
+/-- Issue-time bounds guard for index clauses: a `Bool` conjunction
+asserting each index lands inside its owner *in the original view*
+`t₀.view`. Reuses `viewProjectionOption` (which already emits the
+nested `if i < owner.size` checks, short-circuiting safely on the
+outer index) with a trivial `some ()` payload — the access is in
+bounds iff the probe is `.isSome`. This is the eager, program-order
+check that turns an out-of-range write into a rejection; the deferred
+commit closures keep their own re-check so a write that a *later* op
+supersedes is dropped at commit rather than rejected here. -/
+private def buildIndexGuard (clausePaths : Array (Array PathStep)) :
+    TermElabM (TSyntax `term) := do
+  let mut guard : TSyntax `term ← `(true)
+  for path in clausePaths do
+    if path.any isIdxStep then
+      let probe ← viewProjectionOption (← `(t₀.view)) path (fun _ => `(some ()))
+      guard ← `($guard && ($probe).isSome)
+  return guard
+
 /-- Uncached emission path. Kept *deliberately small*: parse the
 clauses into (path, value) pairs, fold them into a single view-
 update expression, wrap in `{ view := … } : UncachedSSZ H T`.
@@ -578,10 +675,23 @@ private def buildSszUpdateUncached
     clausePaths := clausePaths.push path
     clauseValues := clauseValues.push valStx
   let viewLetChain ← buildViewLetChain clausePaths clauseValues
-  `(
-    let t₀ := $baseStx
-    (({ view := $viewLetChain }) :
-      _root_.SizzLean.Cache.UncachedSSZ $hashStx $tIdent))
+  if clausePaths.any (·.any isIdxStep) then
+    -- Index form: reject (in program order) when an index is out of
+    -- range, matching the pyspec's `IndexError`. `t₀.view` is read by
+    -- both the guard and the view-update chain; on a failed guard the
+    -- update is never built, so nothing is written.
+    let guard ← buildIndexGuard clausePaths
+    `(
+      let t₀ := $baseStx
+      ((if $guard
+        then _root_.Except.ok (({ view := $viewLetChain }) : _root_.SizzLean.Cache.UncachedSSZ $hashStx $tIdent)
+        else _root_.Except.error _root_.SizzLean.Cache.IndexError.indexError) :
+        _root_.Except _root_.SizzLean.Cache.IndexError (_root_.SizzLean.Cache.UncachedSSZ $hashStx $tIdent)))
+  else
+    `(
+      let t₀ := $baseStx
+      (({ view := $viewLetChain }) :
+        _root_.SizzLean.Cache.UncachedSSZ $hashStx $tIdent))
 
 /-- Cached emission path. Walks each clause's path through `T`'s
 nested structure to compute gindex bit-lists and per-clause
@@ -599,7 +709,12 @@ private def buildSszUpdateCached
     let (path, valStx) := parseClause clauseStx
     clausePaths := clausePaths.push path
     clauseValues := clauseValues.push valStx
-    let (bitsPieces, terminalType) ← walkPath T path
+    let (bitsPieces, terminalType, projDrop) ← walkPath T path
+    -- For a packed-basic index terminal, `walkPath` keys the gindex at
+    -- the owning vector/list field and sets `projDrop := 1`; project
+    -- that owner (drop the trailing index) so the closure rebuilds the
+    -- whole field's subtree from the index-updated view.
+    let projPath : Array PathStep := path.extract 0 (path.size - projDrop)
     let fieldTypeStx : TSyntax `term ← PrettyPrinter.delab terminalType
     let bitsListStx ← piecesToTermSyntax bitsPieces
     -- Emit a `PendingWrite T` closure (`T → Option Node`): at
@@ -619,7 +734,7 @@ private def buildSszUpdateCached
     -- folded into the shared view. Overwritten closures (at the
     -- same gindex) are still dropped by `TreeMap.insert` and
     -- never run.
-    let closureBody ← viewProjectionOption viewIdent path fun proj => `(
+    let closureBody ← viewProjectionOption viewIdent projPath fun proj => `(
       some (_root_.SizzLean.Cache.MerkleTree.Node.ofShape $hashStx
               (@_root_.SizzLean.SSZRepr.shape  $fieldTypeStx _)
               (@_root_.SizzLean.SSZRepr.toRepr $fieldTypeStx _ $proj)))
@@ -634,12 +749,24 @@ private def buildSszUpdateCached
   -- walking the spine here. Cross-statement batching falls out
   -- automatically — the spine walk runs once per `commit`, which the
   -- root reader (`hashTreeRootCached`) triggers itself.
-  `(
-    let t₀ := $baseStx
-    ((_root_.SizzLean.Cache.TreeBacked.addPendingMany t₀
-        $updatesListStx
-        $viewLetChain) :
-      _root_.SizzLean.Cache.TreeBacked $hashStx $tIdent))
+  if clausePaths.any (·.any isIdxStep) then
+    -- Index form: a failed issue-time guard returns `.error` *without*
+    -- evaluating `addPendingMany`, so no pending write is recorded for
+    -- an out-of-range index. (Recorded writes still re-check at commit.)
+    let guard ← buildIndexGuard clausePaths
+    `(
+      let t₀ := $baseStx
+      ((if $guard
+        then _root_.Except.ok ((_root_.SizzLean.Cache.TreeBacked.addPendingMany t₀ $updatesListStx $viewLetChain) : _root_.SizzLean.Cache.TreeBacked $hashStx $tIdent)
+        else _root_.Except.error _root_.SizzLean.Cache.IndexError.indexError) :
+        _root_.Except _root_.SizzLean.Cache.IndexError (_root_.SizzLean.Cache.TreeBacked $hashStx $tIdent)))
+  else
+    `(
+      let t₀ := $baseStx
+      ((_root_.SizzLean.Cache.TreeBacked.addPendingMany t₀
+          $updatesListStx
+          $viewLetChain) :
+        _root_.SizzLean.Cache.TreeBacked $hashStx $tIdent))
 
 /-- Box emission path. The base term has type `SSZ.Box H T` — the
 closed sum over the two cache flavours. The macro builds each arm
@@ -665,13 +792,26 @@ private def elabSszUpdateBox
   let armBinder : TSyntax `term ← `(__ssz_box_t)
   let cachedBody   ← buildSszUpdateCached   armBinder hashStx tIdent T clauses
   let uncachedBody ← buildSszUpdateUncached armBinder hashStx tIdent   clauses
-  let finalStx ← `(
-    let __ssz_box_s := $baseStx
-    match __ssz_box_s with
-    | _root_.SizzLean.Cache.SSZ.Box.cached __ssz_box_t =>
-        _root_.SizzLean.Cache.SSZ.Box.cached $cachedBody
-    | _root_.SizzLean.Cache.SSZ.Box.uncached __ssz_box_t =>
-        _root_.SizzLean.Cache.SSZ.Box.uncached $uncachedBody)
+  let finalStx ←
+    if clausesHaveIndex clauses then
+      -- Index form: each arm body is `Except IndexError (cache value)`;
+      -- map the constructor over the `.ok` so the whole match is
+      -- `Except IndexError (SSZ.Box H T)`.
+      `(
+        let __ssz_box_s := $baseStx
+        match __ssz_box_s with
+        | _root_.SizzLean.Cache.SSZ.Box.cached __ssz_box_t =>
+            ($cachedBody).map _root_.SizzLean.Cache.SSZ.Box.cached
+        | _root_.SizzLean.Cache.SSZ.Box.uncached __ssz_box_t =>
+            ($uncachedBody).map _root_.SizzLean.Cache.SSZ.Box.uncached)
+    else
+      `(
+        let __ssz_box_s := $baseStx
+        match __ssz_box_s with
+        | _root_.SizzLean.Cache.SSZ.Box.cached __ssz_box_t =>
+            _root_.SizzLean.Cache.SSZ.Box.cached $cachedBody
+        | _root_.SizzLean.Cache.SSZ.Box.uncached __ssz_box_t =>
+            _root_.SizzLean.Cache.SSZ.Box.uncached $uncachedBody)
   elabTerm finalStx expectedType?
 
 @[term_elab sszUpdateStx]

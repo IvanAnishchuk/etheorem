@@ -75,13 +75,16 @@ private def oneBatchCase (s : Nat) : Bool × Nat :=
   let (newR, s4) := randRoot s3
   let v : BatchExample := { rootsA := rA, rootsB := rB }
   let t : TreeBacked Sha256 BatchExample := TreeBacked.ofValue Sha256 v
-  let t' := sszUpdate t with rootsA[i] := newR
   let updated : BatchExample :=
     { v with rootsA := rA.set! i newR }
-  let rootOk := t'.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 updated
-  let viewOk :=
-    if h : i < 8 then t'.view.rootsA[i] = newR else false
-  (rootOk && viewOk, s4)
+  -- `rootsA[i]` is an index form ⇒ `Except`; `i < 8` always holds here,
+  -- so it is `.ok`. (An out-of-range `i` would `.error`/reject.)
+  match (sszUpdate t with rootsA[i] := newR) with
+  | .ok t' =>
+      let rootOk := t'.hashTreeRootCached.1 = SSZ.hashTreeRoot Sha256 updated
+      let viewOk := if h : i < 8 then t'.view.rootsA[i] = newR else false
+      (rootOk && viewOk, s4)
+  | .error _ => (false, s4)
 
 private def runBatchCases : Nat → Nat → Bool
   | 0,     _ => true
