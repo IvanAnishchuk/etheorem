@@ -73,7 +73,7 @@ graph LR
 
 * **`LeanPoseidonProofs`** — a second subpackage at `../../LeanPoseidonProofs/`.
   It `[[require]]`s `LeanPoseidon` (`../LeanPoseidon`) **and mathlib** — the
-  monorepo's first mathlib dependency. It holds the `CommRing (Fp p)` instance
+  monorepo's only mathlib dependency. It holds the `CommRing (Fp p)` instance
   and the fast-≡-reference equivalence theorem (§9). It is isolated in its
   own package precisely so that the shipped core and its conformance gates
   stay mathlib-free and fast; mathlib's long compile and toolchain
@@ -751,7 +751,7 @@ core by relative path (`../LeanPoseidon`).
 `monorepo-arch.md` is updated to show `LeanPoseidon` as a standalone island
 parallel to `LeanSha256` (with `LeanPoseidonProofs` off it), and `CLAUDE.md`'s
 "three libraries"/layout prose is updated to reflect the new subpackages
-and the repo's first mathlib dependency.
+and the repo's only mathlib dependency.
 
 ## 12. Conventions
 

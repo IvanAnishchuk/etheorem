@@ -278,8 +278,7 @@ namespace LeanPoseidon.Poseidon2
 
 open LeanPoseidon
 
-/-- **The shipped BN254 Poseidon2 permutation is a bijection.** Novel: the first
-machine-checked structural-correctness fact about the bare Poseidon2 permutation.
+/-- **The shipped BN254 Poseidon2 permutation is a bijection.**
 Proved on the dense reference, transported via `permute_eq_permuteRef_bn254`. -/
 theorem permute_bijective_bn254 : Function.Bijective (permute bn254Params) := by
   have hcop : Nat.Coprime 5 (bn254FrModulus - 1) := by decide

@@ -9,7 +9,7 @@ licenseFiles = ["../../LICENSE"]
 name = "LeanPoseidon"
 path = "../LeanPoseidon"
 
-# ...and on mathlib — the monorepo's first (and only) mathlib dependency,
+# ...and on mathlib — the monorepo's only mathlib dependency,
 # isolated in this package so the core and its conformance gates stay
 # mathlib-free and fast. Pinned to the `v4.29.1` tag, whose `lean-toolchain`
 # (`leanprover/lean4:v4.29.1`) matches the repo's exactly — so `lake exe

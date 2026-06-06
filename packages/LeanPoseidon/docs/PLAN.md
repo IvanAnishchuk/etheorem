@@ -408,8 +408,8 @@ generic over `R`, the field is configuration).
   (Poseidon2), the `compress` / `hash` surface, the conformance + proof
   story, the require snippet, and the Nethermind `Poseidon.lean` link for
   v1.
-- Root `README.md`, `CLAUDE.md` ("three libraries" → updated count; first
-  mathlib dep note), and `monorepo-arch.md` (the standalone-island graph)
+- Root `README.md`, `CLAUDE.md` ("three libraries" → updated count; mathlib
+  dep note), and `monorepo-arch.md` (the standalone-island graph)
   updated.
 
 **Acceptance.** Docs land; the umbrella build stays green; a reader can go
@@ -461,8 +461,7 @@ radius is exactly the two specialisations.
    (`gcd(5, p−1) = 1`, `decide`); external/internal dense layers invertible
    (`det = 4` / `det = 7` ≠ 0, `decide`); ARK translations bijective; composed
    over `permuteWith` via a `List.foldl`-based fold-of-bijections lemma; then
-   transported to `permute` through `permute_eq_permuteRef`. **Novel** — the
-   first machine-checked structural property of the bare Poseidon2 permutation.
+   transported to `permute` through `permute_eq_permuteRef`.
 2. ✅ **Sponge `pad` injectivity** — `pad_injective` (`Padding.lean`). No
    primality; the marker `1 ≠ 0` pins the parity, `List.append_inj_left` strips
    the suffix. Axiom footprint completely clean (`[propext, Choice, Quot.sound]`).

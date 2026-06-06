@@ -15,8 +15,8 @@ the shipped path or inside a proof. The shipped primitive is also
 (`permute = permuteRef`), the sponge padding is injective, and the deployed
 round numbers meet the paper's security floor — see [Verification](#verification).
 
-> **Poseidon v1** is out of scope — this is **Poseidon2**. Nethermind's
-> [`Poseidon.lean`](https://github.com/NethermindEth/Poseidon.lean) covers v1.
+> **Poseidon v1** is out of scope — this is **Poseidon2**. For other Lean 4
+> implementations of both, see [Related work](#related-work).
 
 The field is a `ZMod`-style bounded-`Nat` parameterised by the modulus
 (`Fp (p : Nat)`), so a new field is new data, not new code; `Bn254Fr := Fp
@@ -186,6 +186,26 @@ and do not — establish, see [Trust boundary](#trust-boundary).
   compression has collisions.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §10 for the full diagram.
+
+## Related work
+
+The contribution here is the **mechanisation, not the math**. Bijectivity of
+the bare Poseidon2 permutation is a paper exercise: the S-box `x⁵` is
+bijective on prime fields where `gcd(5, p − 1) = 1`, the linear layers are
+invertible by determinant, and composition preserves bijectivity. What
+LeanPoseidon adds is a kernel-checked Lean 4 artefact that pins down *which*
+permutation, *which* field instances, and what depends on what — with the
+round-constants / schedule gap delineated honestly by differential testing
+rather than hidden.
+
+Neighbouring Lean 4 implementations:
+
+- [`NethermindEth/Poseidon.lean`](https://github.com/NethermindEth/Poseidon.lean)
+  — Poseidon (v1) and Poseidon2; the Poseidon2 instances target **BabyBear**
+  at widths 16 and 24, test-validated.
+- [`manuelpuebla/amo-lean`](https://github.com/manuelpuebla/amo-lean)
+  — Poseidon2 over BN254 at `t = 3`; its Poseidon2 proofs carry 12 `sorry`s
+  (as self-reported in its README).
 
 ## Tests
 
