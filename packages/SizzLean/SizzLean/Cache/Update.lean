@@ -128,6 +128,21 @@ time (the fast path); a `[Preset]`-resolved symbolic cap leaves the base as
 per-element writes work on preset-generic containers too. The view side
 calls `Vector.set!` / `SSZList.set!` regardless of cache flavour.
 
+### Checked `[i]` vs infallible `[i]!`
+
+An index segment comes in two forms. The checked `vec[i]` rejects an
+out-of-range index: any clause that uses it makes the whole `sszUpdate`
+return `Except IndexError _`, with the issue-time guard producing
+`.error (indexError i bound)` in program order. The infallible `vec[i]!`
+mirrors `Array.set!`: an out-of-range write is a silent no-op, the clause
+contributes no error, and an `sszUpdate` whose index clauses are *all* `[i]!`
+(or that has none) returns the bare cache value, no `Except` to thread. The
+two forms emit the identical spine address and view rewrite; `[i]!` only drops
+the issue-time guard and the `Except` wrapping. `sszGet` mirrors this: a
+checked `[i]` read returns `Except`, an `[i]!` read returns the element's
+`default` on a miss. Reach for `[i]!` in spec loops where the bound is a known
+invariant; keep `[i]` where a miss must reject.
+
 ## Basic-packed element indices: supported, at owner-rebuild cost
 
 `sszUpdate t with vec[i] := v` where `vec`'s element type is basic
@@ -182,13 +197,24 @@ open SizzLean.Hasher
 
 open Lean Elab Term Meta
 
-/-- A single path segment after the leading ident. Either `.field`
-(descend into a structure field) or `[i]` (descend into a vector /
-list element). The leading ident itself plays the role of the
-first `.field` segment. -/
+/-- A single path segment after the leading ident: `.field` (descend into a
+structure field), `[i]` (descend into a vector / list element, *checked*), or
+`[i]!` (the same element step, *infallible*). The leading ident itself plays
+the role of the first `.field` segment.
+
+`[i]` vs `[i]!` only differ on the out-of-range path. A clause with a checked
+`[i]` makes the whole `sszUpdate` return `Except IndexError _`, rejecting an
+out-of-range index in program order (`sszGet` likewise returns `Except`). The
+bang form `[i]!` mirrors `Array.set!` / `Array.get!`: an out-of-range write is
+a silent no-op and an out-of-range read yields the element type's `default`,
+so the clause never contributes an error and an all-`[i]!` update returns the
+bare cache value. Use `[i]` when the index is attacker-controlled and a miss
+must reject; use `[i]!` inside spec loops where the bound is a known invariant
+and threading `Except` through every write is just noise. -/
 declare_syntax_cat sszUpdateSegment
-syntax (name := sszUpdateSegmentField) "." ident   : sszUpdateSegment
-syntax (name := sszUpdateSegmentIndex) "[" term "]" : sszUpdateSegment
+syntax (name := sszUpdateSegmentField)     "." ident            : sszUpdateSegment
+syntax (name := sszUpdateSegmentIndex)     "[" term "]"          : sszUpdateSegment
+syntax (name := sszUpdateSegmentIndexBang) "[" term "]" noWs "!" : sszUpdateSegment
 
 /-- A single clause: a path (head ident + zero or more segments) on
 the LHS, value on the RHS. Examples:
@@ -236,27 +262,28 @@ private partial def appendSszGetSegments
   if h : i < segs.size then
     let seg := segs[i]
     let e' ← match seg with
-      | `(sszUpdateSegment| .$f:ident) => `($e.$f)
-      | `(sszUpdateSegment| [$j:term]) => `($e[$j])
+      | `(sszUpdateSegment| .$f:ident)  => `($e.$f)
+      | `(sszUpdateSegment| [$j:term])  => `($e[$j])
+      | `(sszUpdateSegment| [$j:term]!) => `($e[$j]!)
       | _ => Macro.throwError s!"sszGet: malformed path segment {seg}"
     appendSszGetSegments e' segs (i + 1)
   else
     return e
 
-/-- True when a `sszGet`/`sszUpdate` path contains an index segment
-`[i]`, the only forms that can go out of bounds, hence the only ones
-that return `Except`. -/
-private def segsHaveIndex (segs : Array (TSyntax `sszUpdateSegment)) : Bool :=
+/-- True when a `sszGet`/`sszUpdate` path contains a *checked* index segment
+`[i]`, the only forms that can reject, hence the only ones that make the
+result `Except`. A bang `[i]!` segment is infallible and does not count. -/
+private def segsHaveCheckedIndex (segs : Array (TSyntax `sszUpdateSegment)) : Bool :=
   segs.any (fun seg => seg.raw.getKind == ``sszUpdateSegmentIndex)
 
-/-- `Except`-producing variant of `appendSszGetSegments`. Walks the path
-from the owner term `cur`: a `.f` step projects, an `[j]` step emits a
-bounds check that rejects with the *real* index and bound,
-`IndexError.indexError j cur.size`, when `j` is out of range, and otherwise
-descends into `cur[j]!`. The fully-walked value is wrapped in `.ok`. Field
-accesses after an index ride inside the in-bounds branch, so the path stays
-a clean `Except IndexError _` with a precise reject at every index
-position. -/
+/-- `Except`-producing variant of `appendSszGetSegments`, used when the path
+has a checked index. Walks the path from the owner term `cur`: a `.f` step
+projects, a checked `[j]` step emits a bounds check that rejects with the
+*real* index and bound (`IndexError.indexError j cur.size`) when `j` is out of
+range and otherwise descends into `cur[j]!`, and a bang `[j]!` step descends
+into `cur[j]!` with no check (it can't reject). The fully-walked value is
+wrapped in `.ok`, so the path stays a clean `Except IndexError _` with a
+precise reject at every checked index position. -/
 private partial def appendSszGetExcept
     (cur : Lean.TSyntax `term)
     (segs : Array (Lean.TSyntax `sszUpdateSegment)) (i : Nat) :
@@ -271,19 +298,22 @@ private partial def appendSszGetExcept
         `(if $j < ($cur).size then $inner
           else _root_.Except.error
                  (_root_.SizzLean.Cache.IndexError.indexError $j ($cur).size))
+    | `(sszUpdateSegment| [$j:term]!) =>
+        appendSszGetExcept (← `(($cur)[$j]!)) segs (i + 1)
     | _ => Macro.throwError s!"sszGet: malformed path segment {seg}"
   else
     `(_root_.Except.ok $cur)
 
 macro_rules
   | `(sszGet $base $head:ident $segs:sszUpdateSegment*) => do
-      if segsHaveIndex segs then
-        -- Index form: out-of-range reads reject with the real index and
-        -- bound, matching `IndexError`.
+      if segsHaveCheckedIndex segs then
+        -- Checked-index form: out-of-range reads reject with the real index
+        -- and bound, matching `IndexError`.
         appendSszGetExcept (← `(($base).view.$head)) segs 0
       else
-        -- Field-only form: pure, reduces for `rfl`/`decide` exactly as
-        -- a hand-written `.view.path`.
+        -- Field-only or all-`[i]!` form: pure bare read. Reduces for
+        -- `rfl`/`decide` exactly as a hand-written `.view.path`; `[i]!`
+        -- yields the element's `default` on a miss (no `Except`).
         let init : Lean.TSyntax `term ← `(($base).view.$head)
         appendSszGetSegments init segs 0
 
@@ -353,11 +383,14 @@ private def bitsToTermSyntax (bits : List Bool) : TermElabM (TSyntax `term) := d
   `([$elems,*])
 
 /-- A single step along an update path. `field name` descends into a
-structure field; `index i` descends into a vector / list element
-(with `i : Nat` an arbitrary runtime term). -/
+structure field; `index i checked` descends into a vector / list element
+(with `i : Nat` an arbitrary runtime term). `checked` is `true` for the
+fallible `[i]` form (an out-of-range index rejects) and `false` for the
+infallible `[i]!` form (an out-of-range write is a no-op, contributing no
+error and no `Except` wrapping). -/
 private inductive PathStep where
   | field (name : Name)
-  | index (idx : TSyntax `term)
+  | index (idx : TSyntax `term) (checked : Bool)
   deriving Inhabited
 
 /-- A piece of the composed gindex-bits expression (cached path
@@ -459,7 +492,10 @@ private def walkPath (rootType : Expr) (path : Array PathStep) :
           terminalType? := some fieldType
         else
           curType := fieldType
-    | .index iStx =>
+    | .index iStx _ =>
+        -- The gindex is identical for the checked `[i]` and infallible `[i]!`
+        -- forms; the `checked` flag only governs the issue-time guard, handled
+        -- in `pathGuardExcept`, not the spine address computed here.
         -- Composite-element index: descend into the element's own
         -- sub-tree (gindex `base + i`). Basic *packed* element: the
         -- element shares a 32-byte chunk with its neighbours and has
@@ -567,13 +603,15 @@ private def nestedViewUpdate (vPrev : TSyntax `term) (path : Array PathStep)
       | .field n =>
           let projIdent := mkIdent n
           ownerStx ← `(($ownerStx).$projIdent:ident)
-      | .index i =>
+      | .index i _ =>
           ownerStx ← `(($ownerStx)[$i]!)
     match step with
     | .field n =>
         let lastIdent := mkIdent n
         cur ← `({ $ownerStx with $lastIdent:ident := $cur })
-    | .index i =>
+    | .index i _ =>
+        -- `set!` no-ops on an out-of-range index for both `[i]` and `[i]!`;
+        -- the difference is only whether the issue-time guard rejects first.
         cur ← `(($ownerStx).set! $i $cur)
   return cur
 
@@ -612,7 +650,10 @@ where
           let projIdent := mkIdent n
           let cur' ← `(($cur).$projIdent:ident)
           go cur' (k + 1)
-      | .index i =>
+      | .index i _ =>
+          -- The commit-time bounds check is kept for both `[i]` and `[i]!`:
+          -- it mirrors the view's `set!` no-op so an out-of-range write drops
+          -- the pending entry rather than corrupting the tree.
           let cur' ← `(($cur)[$i]!)
           let inner ← go cur' (k + 1)
           `(if ($i) < ($cur).size then $inner else none)
@@ -631,7 +672,9 @@ private def parseClause (clauseStx : Syntax) :
       | ``sszUpdateSegmentField =>
           seg[1].getId.components.toArray.map PathStep.field
       | ``sszUpdateSegmentIndex =>
-          #[PathStep.index ⟨seg[1]⟩]
+          #[PathStep.index ⟨seg[1]⟩ true]
+      | ``sszUpdateSegmentIndexBang =>
+          #[PathStep.index ⟨seg[1]⟩ false]
       | _ => #[])
   let path : Array PathStep := headSteps ++ restSteps
   let valStx : TSyntax `term := ⟨clauseStx[3]⟩
@@ -668,16 +711,18 @@ private def buildViewLetChain
     body ← `(let $vCur:ident := $updateRHS; $body)
   `(let $(mkVName 0):ident := t₀.view; $body)
 
-/-- A path step that is an index `[i]` (vs a field `.f`). -/
-private def isIdxStep : PathStep → Bool
-  | .index _ => true
+/-- A path step that is a *checked* index `[i]` (vs a field `.f` or an
+infallible `[i]!`, both of which never reject). This is what decides whether
+an `sszUpdate` returns `Except`. -/
+private def isCheckedIdxStep : PathStep → Bool
+  | .index _ checked => checked
   | .field _ => false
 
-/-- Whether any clause has an index segment, the only forms that can
-go out of bounds, hence the only ones whose `sszUpdate` returns
-`Except IndexError _` rather than the bare cache value. -/
-private def clausesHaveIndex (clauses : Array Syntax) : Bool :=
-  clauses.any (fun c => (parseClause c).1.any isIdxStep)
+/-- Whether any clause has a *checked* index segment, the only forms that can
+reject, hence the only ones whose `sszUpdate` returns `Except IndexError _`
+rather than the bare cache value. An all-`[i]!` (or field-only) update is bare. -/
+private def clausesHaveCheckedIndex (clauses : Array Syntax) : Bool :=
+  clauses.any (fun c => (parseClause c).1.any isCheckedIdxStep)
 
 /-- Walk one update path from `t₀.view`, emitting a bounds check at each
 index step that rejects with the *real* index and bound when out of range.
@@ -698,11 +743,16 @@ where
       | .field n =>
           let projIdent := mkIdent n
           go (← `(($cur).$projIdent:ident)) (k + 1)
-      | .index i =>
+      | .index i checked =>
           let inner ← go (← `(($cur)[$i]!)) (k + 1)
-          `(if ($i) < ($cur).size then $inner
-            else _root_.Except.error
-                   (_root_.SizzLean.Cache.IndexError.indexError ($i) ($cur).size))
+          -- Only a checked `[i]` rejects; an infallible `[i]!` descends with
+          -- no guard (its out-of-range write is a no-op at the view / commit).
+          if checked then
+            `(if ($i) < ($cur).size then $inner
+              else _root_.Except.error
+                     (_root_.SizzLean.Cache.IndexError.indexError ($i) ($cur).size))
+          else
+            pure inner
     else
       pure rest
 
@@ -719,7 +769,7 @@ private def buildIndexGuardExcept (clausePaths : Array (Array PathStep)) :
     TermElabM (TSyntax `term) := do
   let mut guard : TSyntax `term ← `(_root_.Except.ok ())
   for path in clausePaths.reverse do
-    if path.any isIdxStep then
+    if path.any isCheckedIdxStep then
       guard ← pathGuardExcept path guard
   return guard
 
@@ -751,12 +801,12 @@ private def buildSszUpdateUncached
     clausePaths := clausePaths.push path
     clauseValues := clauseValues.push valStx
   let viewLetChain ← buildViewLetChain clausePaths clauseValues
-  if clausePaths.any (·.any isIdxStep) then
-    -- Index form: reject (in program order) when an index is out of
-    -- range, matching the pyspec's `IndexError`. `t₀.view` is read by
-    -- both the guard and the view-update chain; `.map` builds the update
-    -- only on the guard's `.ok` branch, so a failed guard writes nothing
-    -- and carries the offending index/bound forward.
+  if clausePaths.any (·.any isCheckedIdxStep) then
+    -- Checked-index form: reject (in program order) when a `[i]` index is out
+    -- of range, matching the pyspec's `IndexError`. `t₀.view` is read by both
+    -- the guard and the view-update chain; `.map` builds the update only on
+    -- the guard's `.ok` branch, so a failed guard writes nothing and carries
+    -- the offending index/bound forward. Any `[i]!` clauses skip the guard.
     let guard ← buildIndexGuardExcept clausePaths
     `(
       let t₀ := $baseStx
@@ -825,12 +875,13 @@ private def buildSszUpdateCached
   -- walking the spine here. Cross-statement batching falls out
   -- automatically, the spine walk runs once per `commit`, which the
   -- root reader (`hashTreeRootCached`) triggers itself.
-  if clausePaths.any (·.any isIdxStep) then
-    -- Index form: a failed issue-time guard short-circuits to `.error`
-    -- *without* evaluating `addPendingMany` (it sits under `.map`'s
-    -- closure, run only on `.ok`), so no pending write is recorded for an
-    -- out-of-range index, and the real index/bound ride out on the error.
-    -- (Recorded writes still re-check at commit.)
+  if clausePaths.any (·.any isCheckedIdxStep) then
+    -- Checked-index form: a failed issue-time guard short-circuits to `.error`
+    -- *without* evaluating `addPendingMany` (it sits under `.map`'s closure,
+    -- run only on `.ok`), so no pending write is recorded for an out-of-range
+    -- `[i]` index, and the real index/bound ride out on the error. (Recorded
+    -- writes still re-check at commit; `[i]!` clauses skip the guard and rely
+    -- on that commit re-check to drop an out-of-range write.)
     let guard ← buildIndexGuardExcept clausePaths
     `(
       let t₀ := $baseStx
@@ -870,7 +921,7 @@ private def elabSszUpdateBox
   let cachedBody   ← buildSszUpdateCached   armBinder hashStx tIdent tType clauses
   let uncachedBody ← buildSszUpdateUncached armBinder hashStx tIdent   clauses
   let finalStx ←
-    if clausesHaveIndex clauses then
+    if clausesHaveCheckedIndex clauses then
       -- Index form: each arm body is `Except IndexError (cache value)`;
       -- map the constructor over the `.ok` so the whole match is
       -- `Except IndexError (SSZ.Box H T)`.

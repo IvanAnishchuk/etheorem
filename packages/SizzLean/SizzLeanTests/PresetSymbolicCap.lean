@@ -245,7 +245,7 @@ never needs the cap as a number. A *composite* element (its own Merkle
 subtree) is the case the old macro couldn't handle over a symbolic cap: the
 single-leaf gindex is `2 ^ chunkDepth cap + i`, and folding that base needed
 `evalNat` on the cap, which fails on a `[Preset]`-resolved width. The macro
-now splices the cap as a runtime gindex term (`capToTermSyntax`), so the
+now splices the cap as a runtime gindex term (`gindexBaseForCap`), so the
 write elaborates and, at a pinned preset, reduces to the same gindex the
 concrete-cap path produces. -/
 
