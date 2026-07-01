@@ -278,6 +278,10 @@ abbrev kzgCommitmentsInclusionProofDepth : Nat := 4
 (`ATTESTATION_DUE_BPS_GLOAS`, `PAYLOAD_ATTESTATION_DUE_BPS`). -/
 abbrev attestationDueBpsGloas : UInt64 := 2500
 abbrev payloadAttestationDueBps : UInt64 := 7500
+/-- `INCLUSION_LIST_DUE_BPS` (Heze:EIP7805, ~67% of the slot): the timeliness deadline
+for an inclusion list, in basis points of the slot
+(`consensus-specs/specs/heze/fork-choice.md:38`). -/
+abbrev inclusionListDueBps : UInt64 := 6667
 /-- `PROPOSER_SCORE_BOOST` (percent of the per-slot committee weight). -/
 abbrev proposerScoreBoost : Nat := 40
 /-- `BASIS_POINTS` denominator for the slot-component durations. -/
