@@ -10,6 +10,11 @@
 #
 # The pyspec recipes need a Python venv. Run `just setup-python` once first.
 
+# xdist worker count for the full pyspec sweeps; `auto` (one per core) is the
+# historical default. Override on memory-constrained machines:
+# `PYTEST_JOBS=2 just ethcl-pyspec-full`.
+pytest_jobs := env_var_or_default("PYTEST_JOBS", "auto")
+
 # List every recipe with its description
 default:
     @just --list --unsorted
@@ -266,12 +271,12 @@ ethcl-pyspec-smoke: _ensure-venv
 # Full EthCLSpecs pyspec sweep: {fulu,gloas,heze} × {minimal,mainnet}, sharded across cores
 [group('ethcl')]
 ethcl-pyspec-full: _ensure-venv
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=minimal --fork=fulu
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=minimal --fork=gloas
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=minimal --fork=heze
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=mainnet --fork=fulu
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=mainnet --fork=gloas
-    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n auto --preset=mainnet --fork=heze
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=minimal --fork=fulu
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=minimal --fork=gloas
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=minimal --fork=heze
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=mainnet --fork=fulu
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=mainnet --fork=gloas
+    cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q --subset=0 -n {{ pytest_jobs }} --preset=mainnet --fork=heze
 
 # ═════════════════════════════════════════════════════════════════════════
 # SizzLean — SSZ library
