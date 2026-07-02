@@ -2,6 +2,7 @@ import EthCLSpecs.Heze.Transition
 import EthCLSpecs.Gloas.ForkChoice
 import EthCLSpecs.Heze.InclusionList
 import EthCLLib.Spec.FiniteMap
+import EthCLLib.Spec.Engine
 
 /-!
 # `EthCLSpecs.Heze.ForkChoice`: the ePBS node-based fork choice with EIP-7805 (FOCIL)
@@ -168,43 +169,28 @@ inherit computeTimeAtSlot
 inherit verifyExecutionPayloadEnvelopeSignature
 inherit verifyExecutionPayloadEnvelope
 
-/-- The execution-layer seam for the FOCIL fork-choice gate. In the spec,
-`is_inclusion_list_satisfied` is an `ExecutionEngine` predicate
-(`consensus-specs/specs/heze/fork-choice.md:54-62`): its verdict comes from an external EL over the
-Engine API, so a consumer swaps the backend the way `[CryptoBackend]` swaps BLS/KZG. The default
-instance below is the optimistic always-`true` mock, the same treatment Gloas gives
-`verify_and_notify_new_payload` / `is_data_available`; it is the residual EL trust boundary of the
-FOCIL gate, and a test supplies a refuting instance to drive the discriminating `false` branch.
-This class doc is the canonical home of that rationale; the other oracle sites point here. -/
-class ELOracle [Preset] where
-  /-- `is_inclusion_list_satisfied(execution_payload, inclusion_list_transactions)`: whether the
-  payload includes the required inclusion-list transactions. Body is EL-implementation-defined. -/
-  isInclusionListSatisfied : ExecutionPayload → Array Transaction → Bool
-
-/-- The default EL oracle: the optimistic always-`true` mock (rationale on `ELOracle` above).
-Registered globally so every conformance path stays on the optimistic branch with no call-site
-change; a consumer wanting the real EL verdict overrides `[ELOracle]` locally. -/
-instance instELOracleOptimistic [Preset] : ELOracle where
-  isInclusionListSatisfied _ _ := true
-
-variable [ELOracle]
+-- The `is_inclusion_list_satisfied` verdict comes from an external EL over the Engine API
+-- (`consensus-specs/specs/heze/fork-choice.md:54-62`), so it enters through the framework's
+-- `[ExecutionEngine]` seam (`EthCLLib.Spec.Engine`, the canonical home of the optimistic-mock
+-- rationale), instantiated at Heze's payload / transaction types.
+variable [ExecutionEngine ExecutionPayload Transaction]
 
 /-- `is_inclusion_list_satisfied(execution_payload, inclusion_list_transactions)`
 (`consensus-specs/specs/heze/fork-choice.md:54-62`): the `ExecutionEngine` predicate deciding
 whether a payload includes the required inclusion-list transactions. Its verdict is
 EL-implementation-defined (the Engine API answers it against an external EL), so it reads the
-`[ELOracle]` instance rather than a fixed value; the default and the trust boundary are
-documented on `ELOracle` above. -/
+`[ExecutionEngine]` seam rather than a fixed value; the default and the trust boundary are
+documented on `EthCLLib.Spec.ExecutionEngine`. -/
 forkdef isInclusionListSatisfied (payload : ExecutionPayload) (ilTxs : Array Transaction) : Bool :=
-  ELOracle.isInclusionListSatisfied payload ilTxs
+  ExecutionEngine.isInclusionListSatisfied payload ilTxs
 
 /-- `record_payload_inclusion_list_satisfaction(store, state, root, payload, execution_engine)`
 (`consensus-specs/specs/heze/fork-choice.md:180-193`): record whether `payload` satisfies the
 inclusion-list constraints for `root`. Pure here (returns the updated store); the spec mutates
 in place. `get_inclusion_list_store()` is `store.inclusionListStore`; the required
 transactions are read for the previous slot (`state.slot - 1`) at the default `only_timely =
-True`, and the EL verdict comes from `isInclusionListSatisfied`, which reads the `[ELOracle]`
-instance (the spec's `execution_engine` argument, modeled as an injectable seam). -/
+True`, and the EL verdict comes from `isInclusionListSatisfied`, which reads the
+`[ExecutionEngine]` seam (the spec's `execution_engine` argument, modeled injectably). -/
 forkdef recordPayloadInclusionListSatisfaction (store : Store map) (state : State) (root : Root)
     (payload : ExecutionPayload) : Store map :=
   -- The spec reads `Slot(state.slot - 1)`, which assumes `state.slot ≥ 1` (a genesis/slot-0 state
@@ -313,9 +299,9 @@ through the `lookupD` default (off the spec path; the co-write INVARIANT in
 `onExecutionPayloadEnvelope`). Hash-free (`is_payload_verified` is a `payloads`
 membership test, no `htr`), so kernel `#guard`. The pin reaches the predicate end-to-end, including
 the `isPayloadVerified` composition; it fixes the recorded bit by hand rather than through the EL,
-so the `isInclusionListSatisfied` verdict is out of its reach. That verdict is the `[ELOracle]`
-seam's job: `pinRecordRefuted` below drives its refuting branch through the record path into this
-gate. -/
+so the `isInclusionListSatisfied` verdict is out of its reach. That verdict is the
+`[ExecutionEngine]` seam's job: `pinRecordRefuted` below drives its refuting branch through the
+record path into this gate. -/
 
 private def pinPilsRoot : Root := Vector.replicate 32 9
 
@@ -385,7 +371,7 @@ private def pinIlDueMs : UInt64 :=
 #guard pinIlDueMs = 4000
 
 /-- `record_payload_inclusion_list_satisfaction` records the EL verdict at `root`. With the
-optimistic `isInclusionListSatisfied = true` mock (the `ELOracle` default) it writes
+optimistic `isInclusionListSatisfied = true` mock (the `ExecutionEngine` default) it writes
 `true`; the slot-0 `state` drives the underflow-guard branch (no previous slot ⇒ empty required
 set, `getInclusionListTransactions` never reached), though the pinned value alone does not
 discriminate the guard: with an empty store and the optimistic oracle the verdict is `true`
@@ -404,7 +390,7 @@ private def pinRecordSatisfied : Option Bool :=
 example : pinRecordSatisfied = some true := by native_decide
 
 /-- The discriminating counterpart to `pinRecordSatisfied`: the same record path, now under a
-*refuting* `[ELOracle]`. A local `letI : ELOracle` answering `false` overrides the global optimistic
+*refuting* `[ExecutionEngine]`. A local `letI` answering `false` overrides the global optimistic
 instance, the whole reason the seam exists. So the record path writes `false` at a *verified* `root`
 and `isPayloadInclusionListSatisfied` then refuses to extend it. This drives the
 `isInclusionListSatisfied = false` branch the optimistic default and every conformance vector leave
@@ -415,7 +401,8 @@ private def pinRecordRefuted : Option Bool × Bool :=
   letI : Preset := minimal
   letI : Config := minimalConfig
   letI : HasherTag := fastHasherTag
-  letI : ELOracle := { isInclusionListSatisfied := fun _ _ => false }
+  letI : ExecutionEngine (@EthCLSpecs.Heze.ExecutionPayload minimal) Transaction :=
+    { isInclusionListSatisfied := fun _ _ => false }
   let state : State := SSZ.FastBox (default : @EthCLSpecs.Heze.BeaconState minimal)
   let after := recordPayloadInclusionListSatisfaction (pinPilsStore true none) state pinPilsRoot
     (default : @EthCLSpecs.Heze.ExecutionPayload minimal)
