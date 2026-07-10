@@ -7,14 +7,19 @@ import EthCLLib.Spec.Engine
 /-!
 # `EthCLSpecs.Heze.ForkChoice`: the ePBS node-based fork choice with EIP-7805 (FOCIL)
 
-Heze inherits Gloas's whole ePBS node fork choice and adds the EIP-7805 inclusion-list layer
-on top (`consensus-specs/specs/heze/fork-choice.md`). `ForkChoiceNode` / `LatestMessage` are
-`inherit`ed unchanged; the `Store` is re-declared (a `forkstruct` rather than an `inherit`) to
-carry the two `[New in Heze:EIP7805]` fields, `payloadInclusionListSatisfaction` and the folded-in
-`inclusionListStore`. The spec keeps a separate process-lifetime `InclusionListStore`, but this
-framework's pure `EStateM` fork choice threads one `Store`, so the inclusion-list store rides inside
-it (see the `InclusionListStore` block below for the full rationale). Most handlers are
-inherited verbatim; the FOCIL touch points are re-declared here:
+Heze inherits the whole node-based fork choice of Gloas's ePBS (EIP-7732) and adds the
+EIP-7805 FOCIL layer on top (`consensus-specs/specs/heze/fork-choice.md`). `ForkChoiceNode` /
+`LatestMessage` are `inherit`ed unchanged (`inherit` replays an ancestor fork's captured
+declaration in this namespace; the inheritance mechanism is `SPEC_AUTHORING_MODEL.md` §8).
+The three node smart constructors and the `deriving` lines are plain declarations in Gloas,
+which the capture does not cover, so they are restated here. The `Store` is re-declared as a
+fresh `forkstruct` (the framework's fork-aware `structure` form, capturable for a later
+fork's `inherit`) instead of an `inherit`, to carry the two `[New in Heze:EIP7805]` fields:
+`payloadInclusionListSatisfaction` and the folded-in `inclusionListStore`. The spec keeps a
+separate process-lifetime `InclusionListStore`; this framework's fork choice threads one
+`Store` value through the generic `StoreTransition` monad, so the inclusion-list store rides
+inside it (the `InclusionListStore` declaration below carries the full rationale). Most
+handlers are inherited verbatim; the FOCIL touch points are re-declared here:
 
 * `get_forkchoice_store` seeds the two new store fields empty;
 * `is_payload_inclusion_list_satisfied` / `record_payload_inclusion_list_satisfaction` /
@@ -23,19 +28,24 @@ inherited verbatim; the FOCIL touch points are re-declared here:
 * `on_execution_payload_envelope` records satisfaction before storing the payload;
 * `on_inclusion_list` is the new wire handler.
 
-EIP-7805 also extends `PayloadAttributes` with `inclusion_list_transactions` and threads it through
-`notify_forkchoice_updated` (`heze/fork-choice.md:65-104`). Both are the production-side Engine-API
-surface a proposer drives to build its own payload, so they sit outside the modeled
-state-transition and fork-choice scope and stay unmodeled here, the same boundary every fork keeps.
-Only the consumption-side `is_inclusion_list_satisfied` is modeled, through the `[ExecutionEngine]`
-seam that `record_payload_inclusion_list_satisfaction` calls to judge a revealed payload.
+EIP-7805 also extends `PayloadAttributes` with `inclusion_list_transactions` and threads it
+through `notify_forkchoice_updated` (`heze/fork-choice.md:65-104`). Both belong to the
+production-side Engine-API surface, the calls a proposer drives to build its own payload.
+That surface sits outside the modeled state-transition and fork-choice scope, the boundary
+every fork keeps, so both stay unmodeled here. Only the consumption side is modeled:
+`is_inclusion_list_satisfied`, through the `[ExecutionEngine]` seam (one of the injection
+seams, `FRAMEWORK_ARCHITECTURE.md` §1; defined in `EthCLLib.Spec.Engine`) that
+`record_payload_inclusion_list_satisfaction` calls to judge a revealed payload.
 
-The `on_execution_payload_envelope` fork_choice vectors do drive the two overrides, but only the
-empty-inclusion-list, always-satisfied path they share with Gloas; the FOCIL-specific behavior (the
-discriminating satisfaction gate and `on_inclusion_list`) has no vector, so the pinned alpha.11 spec
-is its oracle. Each override mirrors its Python branch-for-branch, and the `InclusionListStore`
-`#guard`s below pin the inclusion-list store logic. The three node smart constructors and the `deriving` lines are
-plain declarations in Gloas (not captured), so they are restated here.
+Vector coverage is partial, and the split matters. The `on_execution_payload_envelope`
+fork_choice vectors do drive `onExecutionPayloadEnvelope` and `shouldExtendPayload`, but only
+on the empty-inclusion-list, always-satisfied path they share with Gloas. The FOCIL-specific
+behavior (the discriminating satisfaction gate and `on_inclusion_list`) has no vector; the
+pinned spec text (`consensus-specs` at tag `v1.7.0-alpha.11`) is its oracle
+(`IMPLEMENTATION_NOTES.md`, "Heze diff", is the catalogue). Each override mirrors its Python
+branch-for-branch, and the build-enforced pin sections below fix the inclusion-list logic's
+expected outcomes at build time: kernel `#guard`s where the outcome is hash-free,
+`native_decide` examples where a hash-tree-root must be computed.
 -/
 
 set_option autoImplicit false
@@ -56,19 +66,24 @@ inherit LatestMessage
 deriving instance Inhabited for LatestMessage
 
 /-- `InclusionListStore` (`consensus-specs/specs/heze/inclusion-list.md:28-38`): the
-fork-choice node's view of the inclusion lists it has seen. `inclusionLists` files each
-stored `InclusionList` under its committee root then its own hash-tree root
-(`DefaultDict[Root, Dict[Root, InclusionList]]`); `inclusionListTimeliness` records, per
-stored-list root, whether it arrived before `INCLUSION_LIST_DUE_BPS`; `equivocators` is the
-per-committee set of validator indices caught publishing two different lists. A `forkstruct`
-rather than a bare `structure`, so a later fork can `inherit` it, and so it carries the auto
-`[Preset]` / `[HasherTag]` uniformly with the containers it nests.
+fork-choice node's view of the inclusion lists it has seen. The three fields:
 
-Declared here, above the fork-choice `Store` that carries it as a field, rather than in a
-separate feature file: the spec keeps `InclusionListStore` as a process-lifetime singleton reached
-through `get_inclusion_list_store()`, but this framework's fork choice is a pure `EStateM` over one
-`Store`, so the store is modeled as a field of that `Store`. It is fork-choice state, so it lives
-with fork choice, next to the handlers that drive it. -/
+* `inclusionLists`: every stored `InclusionList`, keyed first by its committee root, then by
+  the list's own hash-tree root (the spec's `DefaultDict[Root, Dict[Root, InclusionList]]`);
+* `inclusionListTimeliness`: per stored-list root, whether the list arrived before the
+  `INCLUSION_LIST_DUE_BPS` deadline;
+* `equivocators`: per committee root, the validators caught publishing two different lists.
+
+A `forkstruct` rather than a bare `structure`, so a later fork can `inherit` it, and so it
+carries the auto `[Preset]` / `[HasherTag]` uniformly with the containers it nests.
+
+This declaration is the canonical home of the fold-in rationale. The spec keeps
+`InclusionListStore` as a process-lifetime singleton reached through
+`get_inclusion_list_store()`. This framework's fork choice threads one `Store` value through
+the generic `StoreTransition` monad (`SPEC_AUTHORING_MODEL.md` §4), with no ambient mutable
+singleton to hang the spec's store off, so the store is modeled as a `Store` field instead
+and moves with the rest of the state. Behavior is identical. It is fork-choice state, so it
+lives here, next to the handlers that drive it. -/
 forkstruct InclusionListStore (map : MapKind) [HasherTag] where
   inclusionLists          : map Root (map Root InclusionList)
   inclusionListTimeliness : map Root Bool
@@ -78,28 +93,32 @@ section
 
 variable [Preset] [HasherTag] [Config] {map : MapKind} [FcMap map]
 
-/-- The empty `InclusionListStore`: no stored lists, no timeliness, no equivocators. The seed
-`get_forkchoice_store` plants (`consensus-specs/specs/heze/fork-choice.md:165`) and the base
-every pin builds from, so the all-empty literal lives in one place. -/
+/-- The empty `InclusionListStore`: no stored lists, no timeliness, no equivocators.
+`getForkchoiceStore` seeds the folded-in `Store` field with it. The spec has no counterpart
+line: there the store is the lazily-created `get_inclusion_list_store()` singleton (see the
+`InclusionListStore` docstring above for the fold-in). Every pin below also builds from it,
+so the all-empty literal lives in one place. -/
 def InclusionListStore.empty : InclusionListStore map :=
   { inclusionLists := FcMap.empty, inclusionListTimeliness := FcMap.empty, equivocators := FcMap.empty }
 
 /-- The inner comprehension of `get_inclusion_list_transactions`
 (`consensus-specs/specs/heze/inclusion-list.md:105-114`): over the inclusion lists stored for
 one committee key, keep those from non-equivocating validators (and, when `onlyTimely`, only
-the timely ones), gather their transactions, and deduplicate. Factored out of the accessor so
-the equivocator / timeliness / dedup logic is unit-checkable without building a `BeaconState`
-for the committee key (the `cyclicSample` pattern). One pass with `FcMap.fold` over the stored
-map, which hands each `(ilRoot, il)` straight to the step (no second `lookup`, no dead `none`
-branch). `timeliness[ilRoot]` is a plain dict read in the spec (every stored list has a
-timeliness entry, written together in `process_inclusion_list`); the structurally-present key
-reads through `.getD false`, the default never reached on the spec path. The dedup is the house
-`arrayUnion #[] …` first-occurrence union: the spec's `list(set(transactions))` keeps each
-transaction once and calls the order irrelevant, so a deterministic first-occurrence
-representative lets the result be pinned by `#guard`. -/
+the timely ones), gather their transactions, and deduplicate.
+
+Factored out of the accessor so the equivocator / timeliness / dedup logic is unit-checkable
+without building a `BeaconState` for the committee key, the same reason `cyclicSample` is
+factored out in `Committees`. The dedup keeps each transaction's first occurrence
+(`arrayUnion`): the spec's `list(set(transactions))` keeps each transaction once and calls
+the order irrelevant, so a deterministic representative lets `#guard` pin the result.
+`timeliness[ilRoot]` is a plain dict read in the spec; the `.getD false` default here is
+unreachable on the spec path, because `process_inclusion_list` writes every stored list and
+its timeliness entry together. -/
 private def collectInclusionListTransactions (inclusionLists : map Root InclusionList)
     (equivocators : Array ValidatorIndex) (timeliness : map Root Bool) (onlyTimely : Bool) :
     Array Transaction :=
+  -- One `FcMap.fold` pass: each stored `(ilRoot, il)` goes straight to the filter, with no
+  -- second `lookup` and no dead `none` branch.
   let collected : Array Transaction :=
     FcMap.fold (fun acc ilRoot il =>
       let timely := FcMap.lookupD timeliness ilRoot
@@ -229,12 +248,13 @@ inherit payloadDataAvailability
 inherit isPreviousSlotPayloadDecision
 
 /-- `is_payload_inclusion_list_satisfied(store, root)`
-(`consensus-specs/specs/heze/fork-choice.md:199-212`): whether the payload for `root` satisfied
-the inclusion-list constraints and is locally available. The spec opens with `assert root in
-store.payload_inclusion_list_satisfaction`; a pure `Bool` predicate cannot throw, so a missing
-key reads as `false` through `lookupD`, the same default-on-miss the sibling `payloadTimeliness`
-uses. That default sits off the spec path thanks to the `payloads`/satisfaction co-write; the
-INVARIANT note in `onExecutionPayloadEnvelope` is the canonical statement. -/
+(`consensus-specs/specs/heze/fork-choice.md:199-212`): whether the payload for `root`
+satisfied the inclusion-list constraints and is locally available. The spec opens with
+`assert root in store.payload_inclusion_list_satisfaction`; a pure `Bool` predicate cannot
+throw, so a missing key reads as `false` through `lookupD` (the same default-on-miss the
+sibling `payloadTimeliness` uses). The default is unreachable on the spec path, because
+`onExecutionPayloadEnvelope` always writes `payloads` and the satisfaction entry together;
+the INVARIANT note there is the canonical statement of that argument. -/
 forkdef isPayloadInclusionListSatisfied (store : Store map) (root : Root) : Bool :=
   isPayloadVerified store root && FcMap.lookupD store.payloadInclusionListSatisfaction root
 
@@ -336,10 +356,11 @@ forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) 
   | .ok warm =>
     -- [New in Heze:EIP7805] record whether the payload satisfies the inclusion-list constraints
     let store := recordPayloadInclusionListSatisfaction store state envelope.beaconBlockRoot envelope.payload
-    -- INVARIANT: `payloads[root]` and `payloadInclusionListSatisfaction[root]` are co-written here
-    -- (the satisfaction key via `recordPayloadInclusionListSatisfaction` just above). Keep them
-    -- co-written: `isPayloadInclusionListSatisfied`'s default-false-on-miss is sound only because a
-    -- verified `root` (present in `payloads`) always carries a satisfaction entry.
+    -- INVARIANT: `payloads[root]` and `payloadInclusionListSatisfaction[root]` are written
+    -- together here (the satisfaction key via `recordPayloadInclusionListSatisfaction` just
+    -- above). Keep it that way: `isPayloadInclusionListSatisfied`'s default-false-on-miss is
+    -- sound only because a verified `root` (present in `payloads`) always carries a
+    -- satisfaction entry.
     set { store with
       blockStates := FcMap.insert store.blockStates envelope.beaconBlockRoot warm,
       payloads := FcMap.insert store.payloads envelope.beaconBlockRoot envelope }
@@ -353,9 +374,10 @@ inherit onAttesterSlashing
 
 /-- `get_forkchoice_store(anchor_state, anchor_block)` (Heze override,
 `consensus-specs/specs/heze/fork-choice.md:140-166`): the Gloas anchor store with the two
-`[New in Heze:EIP7805]` fields seeded empty, `payloadInclusionListSatisfaction` as an empty
-map and `inclusionListStore` as the empty `InclusionListStore` (`fork-choice.md:165`, decision
-A). The rest is Gloas verbatim. -/
+`[New in Heze:EIP7805]` fields seeded empty: `payloadInclusionListSatisfaction` as an empty
+map (`fork-choice.md:165`) and `inclusionListStore` as the empty `InclusionListStore` (no
+spec counterpart; the spec's store is a process-lifetime singleton, folded into `Store` here,
+see the `InclusionListStore` docstring). The rest is Gloas verbatim. -/
 forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) : Store map :=
   let anchorRoot := htr anchorBlock
   let epoch := currentEpochOf anchorState
@@ -376,8 +398,8 @@ forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) : S
     payloads := FcMap.empty
     payloadTimelinessVote := FcMap.empty
     payloadDataAvailabilityVote := FcMap.empty
-    -- [New in Heze:EIP7805] seeded empty in lockstep with `payloads` above (the co-write
-    -- INVARIANT in `onExecutionPayloadEnvelope`).
+    -- [New in Heze:EIP7805] seeded empty in lockstep with `payloads` above (the INVARIANT
+    -- note in `onExecutionPayloadEnvelope`: the two maps are always written together).
     payloadInclusionListSatisfaction := FcMap.empty
     inclusionListStore := InclusionListStore.empty }
 
@@ -405,20 +427,18 @@ end
 
 /-! ### Build-enforced pin (vectorless): the inclusion-list satisfaction gate
 
-`is_payload_inclusion_list_satisfied` is the FOCIL fork-choice gate `should_extend_payload` reads
-to refuse a payload that failed its inclusion-list constraints. No conformance vector exercises it,
-and the no-regression sweep only runs the optimistic `is_inclusion_list_satisfied = true` mock, so
-the discriminating `false` branch is otherwise dead. This pin drives the predicate on a minimal
-`Store` directly, fixing its outcomes by hand: verified + recorded-`false` ⇒ `false` (the gate's
-whole point), verified + recorded-`true` ⇒ `true`, unverified ⇒ `false` even with the bit recorded
-`true` (the `is_payload_verified` membership gate dominates), and verified-but-absent ⇒ `false`
-through the `lookupD` default (off the spec path; the co-write INVARIANT in
-`onExecutionPayloadEnvelope`). Hash-free (`is_payload_verified` is a `payloads`
-membership test, no `htr`), so kernel `#guard`. The pin reaches the predicate end-to-end, including
-the `isPayloadVerified` composition; it fixes the recorded bit by hand rather than through the EL,
-so the `isInclusionListSatisfied` verdict is out of its reach. That verdict is the
-`[ExecutionEngine]` seam's job: `pinRecordRefuted` below drives its refuting branch through the
-record path into this gate. -/
+`is_payload_inclusion_list_satisfied` is the FOCIL fork-choice gate `should_extend_payload`
+reads to refuse a payload that failed its inclusion-list constraints. No conformance vector
+exercises it, and the pyspec conformance runs answer every engine call through the optimistic
+`is_inclusion_list_satisfied = true` default, so the discriminating `false` branch is
+otherwise dead code. This pin drives the predicate on a minimal `Store` directly; the four
+verified/recorded combinations are enumerated one per `#guard` below, each with its expected
+verdict beside it. Everything is hash-free (`is_payload_verified` is a `payloads` membership
+test, no `htr`), so kernel `#guard` per the hash-tactic rule.
+
+The pin fixes the recorded bit by hand rather than through the engine, so the
+`isInclusionListSatisfied` verdict itself is out of its reach; `pinRecordRefuted` below
+drives that refuting branch through the record path into this gate. -/
 
 private def pinPilsRoot : Root := Vector.replicate 32 9
 
@@ -466,7 +486,8 @@ private def pinPils (payloadPresent : Bool) (recorded : Option Bool) : Bool :=
 #guard pinPils true (some true) = true
 -- unverified (root ∉ payloads) ⇒ `false`, even with the satisfaction bit recorded `true`.
 #guard pinPils false (some true) = false
--- verified but no recorded entry ⇒ `false` via the `lookupD` default (off the spec path).
+-- verified but no recorded entry ⇒ `false` via the `lookupD` default (a state the spec's
+-- own invariant rules out; the INVARIANT note in `onExecutionPayloadEnvelope`).
 #guard pinPils true none = false
 
 /-! ### Build-enforced pins (vectorless): the FOCIL fork-choice helpers
@@ -487,15 +508,17 @@ private def pinIlDueMs : UInt64 :=
   getInclusionListDueMs
 #guard pinIlDueMs = 4000
 
-/-- `record_payload_inclusion_list_satisfaction` records the EL verdict at `root`. With the
-optimistic `isInclusionListSatisfied = true` mock (the `ExecutionEngine` default) it writes
-`true`; the slot-0 `state` drives the underflow-guard branch (no previous slot ⇒ empty required
-set, `getInclusionListTransactions` never reached), though the pinned value alone does not
-discriminate the guard: with an empty store and the optimistic oracle the verdict is `true`
-either way. `state` is a `FastBox` of the default minimal `BeaconState`, the boxed `State` the
-forkdef wants (`State = SSZ.Box HasherTag.H BeaconState`); `FastBox` is FFI-backed, so this is a
-`native_decide` `example`
-(`Lean.ofReduceBool`). -/
+/-- `record_payload_inclusion_list_satisfaction` records the engine verdict at `root`: with
+the optimistic default (`isInclusionListSatisfied = true`) it writes `true`. The slot-0
+`state` also sends execution down the underflow-guard branch (no previous slot, so the
+required set is empty and `getInclusionListTransactions` is never reached). Note the pinned
+value alone does not discriminate that guard: with an empty store and the optimistic oracle
+the verdict is `true` either way. What this pin fixes is the record path writing the verdict
+at the right key.
+
+Lean mechanics: the forkdef wants the boxed `State` (`State = SSZ.Box HasherTag.H
+BeaconState`), so `state` is a `FastBox` of the default minimal `BeaconState`. `FastBox` is
+FFI-backed, so this is a `native_decide` `example` (`Lean.ofReduceBool`). -/
 private def pinRecordSatisfied : Option Bool :=
   letI : Preset := minimal
   letI : Config := minimalConfig
@@ -506,14 +529,14 @@ private def pinRecordSatisfied : Option Bool :=
   FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot
 example : pinRecordSatisfied = some true := by native_decide
 
-/-- The discriminating counterpart to `pinRecordSatisfied`: the same record path, now under a
-*refuting* `[ExecutionEngine]`. A local `letI` answering `false` overrides the global optimistic
-instance, the whole reason the seam exists. So the record path writes `false` at a *verified* `root`
-and `isPayloadInclusionListSatisfied` then refuses to extend it. This drives the
-`isInclusionListSatisfied = false` branch the optimistic default and every conformance vector leave
-dead, end-to-end: oracle → recorded verdict → gate. `pinPilsStore true none` puts `root ∈ payloads`
-so the membership check passes and the recorded bit is what decides. `State` is FFI-backed
-(`FastBox`), so `native_decide`. -/
+/-- The discriminating counterpart to `pinRecordSatisfied`: the same record path under a
+*refuting* engine, a local `letI` instance answering `false` in place of the optimistic
+default (`EthCLLib.Spec.Engine` documents the design). The record path writes `false` at a
+*verified* `root`, and `isPayloadInclusionListSatisfied` then refuses to extend it. That
+covers the branch every conformance vector leaves dead, end-to-end: oracle → recorded
+verdict → gate. `pinPilsStore true none` puts `root ∈ payloads`, so the membership check
+passes and the recorded bit is what decides. `State` is FFI-backed (`FastBox`), so
+`native_decide`. -/
 private def pinRecordRefuted : Option Bool × Bool :=
   letI : Preset := minimal
   letI : Config := minimalConfig
@@ -550,7 +573,8 @@ example : pinOnIlTimely 4 = some false := by native_decide
 
 /-! ### Build-enforced pins for the inclusion-list store (vectorless)
 
-FOCIL has no conformance vector, so these pin `process_inclusion_list`'s three branches and
+FOCIL has no conformance vector (the module docstring carries the coverage story), so these
+pin `process_inclusion_list`'s three branches and
 `get_inclusion_list_transactions`'s comprehension to hand-derived outcomes. They build a small
 `InclusionListStore treeMap` (deterministic key order) under the minimal preset and the FFI
 hasher. The branch-(A)/(B) pins and every `collectInclusionListTransactions` pin are

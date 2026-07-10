@@ -229,7 +229,7 @@ _ensure-venv:
     fi
 
 # ═════════════════════════════════════════════════════════════════════════
-# EthCLSpecs — consensus-spec framework + Fulu / Gloas fork bodies
+# EthCLSpecs — consensus-spec framework + Fulu / Gloas / Heze fork bodies
 #
 # EthCLLib + EthCLSpecs (the consensus-spec framework + Fulu/Gloas bodies). The
 # `*Tests` libs carry the framework + spec `#guard` / `native_decide` self-tests
@@ -237,7 +237,7 @@ _ensure-venv:
 # building them fires the gates.
 # ═════════════════════════════════════════════════════════════════════════
 
-# EthCLLib + EthCLSpecs self-tests (framework + Fulu/Gloas spec gates)
+# EthCLLib + EthCLSpecs self-tests (framework + fork spec gates)
 [group('ethcl')]
 ethcl-test:
     lake build EthCLLib EthCLLibTests EthCLSpecs EthCLSpecsTests
@@ -252,7 +252,7 @@ ethcl-pyspec args="": _ensure-venv
     cd packages/EthCLSpecs/PySpecTests && {{ justfile_directory() }}/.venv/bin/python -m pytest -q {{ args }}
 
 # CI smoke gate for EthCLSpecs pyspec: the dev subset (a few cases per
-# handler) at minimal for both forks. Currently-green formats pass; the rest
+# handler) at minimal for all three forks. Currently-green formats pass; the rest
 # xfail as the Phase-2 work-queue, so the run is green (exit 0) iff no in-scope
 # vector hits a bug-smell or a real mismatch. Mainnet / full sweep run on demand.
 
@@ -288,7 +288,7 @@ ethcl-pyspec-full: _ensure-venv
 # boolean, the test-only containers); the EIP-7495 / 7916 / 8016 progressive /
 # stable / compatible forms are out of `SizzLean`'s universe and xfail. The
 # per-fork consensus-container `ssz_static` vectors run inside the EthCLSpecs
-# `ethcl-pyspec*` recipes (Fulu + Gloas), not here.
+# `ethcl-pyspec*` recipes (the fork bodies), not here.
 # ═════════════════════════════════════════════════════════════════════════
 
 # `SizzLeanTests.PendingListShrink` Cases 4/5/7 deliberately drive

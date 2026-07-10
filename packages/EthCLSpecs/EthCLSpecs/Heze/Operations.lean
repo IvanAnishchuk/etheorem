@@ -6,8 +6,9 @@ import EthCLSpecs.Gloas.Operations
 
 EIP-7805 changes no block operation. Every Gloas operation handler (the inherited
 non-ePBS ones and the ePBS-modified / EIP-8282 builder ones) is `inherit`ed over Heze
-state, in Gloas's order. `addressOfCred` is a plain `def` in Gloas (not captured by
-`forkdef`), so it is restated here before its first use.
+state, in Gloas's order. `addressOfCred` is a plain `def` in Gloas, and only the capturing
+declaration forms (`forkdef` / `forkcontainer` / `forkstruct`, `SPEC_AUTHORING_MODEL.md`
+§8.5) are stored for `inherit` to replay, so it is restated here before its first use.
 -/
 
 set_option autoImplicit false

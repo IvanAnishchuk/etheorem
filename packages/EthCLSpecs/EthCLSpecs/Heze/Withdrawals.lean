@@ -6,8 +6,9 @@ import EthCLSpecs.Gloas.Withdrawals
 
 EIP-7805 changes no withdrawal logic. Gloas's `process_withdrawals` and its sweep helpers
 are `inherit`ed over Heze state. `addressOf` / `balanceAfterWithdrawals` are plain `def`s
-in Gloas (not captured `forkdef`s), so they are restated for the Heze validator / state
-before the sweep helpers that use them.
+in Gloas, which the capture does not cover (only `forkdef` / `forkcontainer` / `forkstruct`
+replay, `SPEC_AUTHORING_MODEL.md` §8.5), so they are restated for the Heze validator /
+state before the sweep helpers that use them.
 -/
 
 set_option autoImplicit false

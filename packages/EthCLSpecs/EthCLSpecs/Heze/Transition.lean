@@ -7,8 +7,9 @@ import EthCLSpecs.Gloas.Transition
 EIP-7805 (FOCIL) leaves the EIP-7732 block spine unchanged. `process_slot` /
 `process_epoch` / `process_slots` / `process_operations` / `process_block` /
 `state_transition` (and the unchanged `process_randao` / `process_eth1_data` /
-`verify_block_signature`) are all `inherit`ed over Heze state; their sub-calls late-bind
-to the Heze copies from the earlier spine files.
+`verify_block_signature`) are all `inherit`ed over Heze state. When `inherit` replays each
+definition here, its unqualified callee names resolve to the Heze versions declared in the
+files above, the transition "spine", and never to the Gloas originals.
 -/
 
 set_option autoImplicit false

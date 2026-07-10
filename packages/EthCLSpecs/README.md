@@ -25,12 +25,14 @@ Three forks are in scope:
 - **Fulu** is the base, authored whole. It carries the accumulated
   beacon-chain spec from Phase 0 through Electra, plus Fulu's PeerDAS
   data-availability additions (EIP-7594).
-- **Gloas** is a diff over Fulu. It adds enshrined proposer-builder separation
-  (EIP-7732): a builder registry, execution payload bids, the
+- **Gloas** is a diff over Fulu. It adds ePBS (EIP-7732): a builder
+  registry, execution payload bids, the
   payload-timeliness committee, and a reordered block pipeline.
 - **Heze** is a thin diff over Gloas. It adds fork-choice inclusion lists
-  (EIP-7805 FOCIL): the `InclusionList` container family, the inclusion-list
-  committee helpers, and the fork-choice store and satisfaction gate.
+  (EIP-7805 FOCIL): the `InclusionList` container family, the
+  inclusion-list committee helpers, an inclusion-list store folded into the
+  fork-choice store, and the payload satisfaction gate
+  (`is_payload_inclusion_list_satisfied`).
 
 For each fork the library implements the SSZ containers, the state transition
 (slots, blocks, epochs, and every operation), the fork upgrade, and a second

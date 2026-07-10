@@ -8,7 +8,8 @@ sanctioned cross-fork reference. At alpha.11 it is a near-passthrough: every
 `BeaconState` field carries across and only the fork version bumps. Because Heze's
 containers are fresh namespace twins of Gloas's, each container field is copied through
 a field-by-field `cv*` converter, the mechanical price of the flat namespace. No builder
-onboarding / PTC recompute (the upgrade is a pure copy).
+onboarding and no PTC recompute: builders were onboarded and the PTC window built at the
+Gloas fork, and EIP-7805 adds no `BeaconState` field, so the upgrade is a pure copy.
 -/
 
 set_option autoImplicit false
@@ -69,7 +70,9 @@ private def cvExecutionPayloadBid [Preset] (v : Gloas.ExecutionPayloadBid) : Exe
 /-- The fork upgrade `upgrade_to_heze(pre)`: builds the Heze state from a finished Gloas
 one. At alpha.11 every field carries across; only the fork version changes
 (`previous := pre.fork.current`, `current := HEZE_FORK_VERSION`, `epoch := get_current_epoch(pre)`).
-`hezeForkVersion` is the config's `HEZE_FORK_VERSION`, passed by the runner. -/
+No builder onboarding or PTC recompute is needed: both already happened at the Gloas fork
+and live in the pre-state. `hezeForkVersion` is the config's `HEZE_FORK_VERSION`, passed by
+the runner. -/
 def upgradeToHeze [Preset] (hezeForkVersion : Version) (pre : Gloas.BeaconState) :
     Heze.BeaconState :=
   let epoch : Epoch := pre.slot / UInt64.ofNat Const.slotsPerEpoch

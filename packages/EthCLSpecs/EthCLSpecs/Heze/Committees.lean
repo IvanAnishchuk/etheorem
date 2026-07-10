@@ -4,7 +4,7 @@ import EthCLSpecs.Heze.EpochProcessing
 # `EthCLSpecs.Heze.Committees`: the EIP-7805 (FOCIL) inclusion-list committee accessor
 
 Heze inherits `Committees` from Fulu verbatim; this file adds the one new committee accessor
-EIP-7805 introduces. `get_inclusion_list_committee` (the "Beacon state accessors" section,
+EIP-7805 (FOCIL) introduces. `get_inclusion_list_committee` (the "Beacon state accessors" section,
 `consensus-specs/specs/heze/beacon-chain.md:95-110`) samples a fixed-size committee from the
 slot's beacon committees. It leans on accessors inherited over `Heze.State` in `EpochProcessing`
 (`getBeaconCommittee`, `getCommitteeCountPerSlot`, `computeEpochAtSlot`). FOCIL adds no state
@@ -45,6 +45,10 @@ private def cyclicSample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) : 
 #guard (cyclicSample (#[7, 8] : Array UInt64) Const.inclusionListCommitteeSize).toList
   = [7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8]
 
+-- `state_section` is the framework's header macro (`SPEC_AUTHORING_MODEL.md` §4): it opens
+-- the section and emits the `variable` line, `[Preset]` / `[Config]` / `[HasherTag]` /
+-- `[CryptoBackend]` plus the `StateTransition` monad variable and its constraints, which the
+-- `forkdef`s below take implicitly (`EthCLLib.Spec.Header`).
 state_section
 
 /-- `get_inclusion_list_committee(state, slot)` (EIP-7805,
@@ -54,9 +58,8 @@ cyclically. Mirrors the Python branch-for-branch: `epoch = compute_epoch_at_slot
 `range(committees_per_slot)` accumulation that `extend`s each `get_beacon_committee`, and the
 `indices[i % len(indices)]` `Vector` fill (here `cyclicSample`). `get_beacon_committee` takes
 a `Nat` committee index in this framework, so the loop counter `i` is passed directly; the
-Python `CommitteeIndex(i)` wrapper is the same value. The degenerate empty-committee case the
-Python would hit with a `ZeroDivisionError` (`len(indices) == 0`) is instead a total read here
-(`i % 0 = i`, default element), a state a real beacon chain never reaches. -/
+Python `CommitteeIndex(i)` wrapper is the same value. The degenerate empty-committee read is
+total here where the Python would raise; `cyclicSample` above carries the mechanics. -/
 forkdef getInclusionListCommittee (state : State) (slot : Slot) :
     Vector ValidatorIndex Const.inclusionListCommitteeSize :=
   let epoch := computeEpochAtSlot slot

@@ -44,12 +44,14 @@ Bumping the pin touches more than the constant. In one pass:
    (`Interface.lean`) together.
 2. Re-run the full sweep (`just ethcl-pyspec-full`) at both presets.
 3. Revalidate the spec-markdown line anchors (`<file>.md:NN`) in
-   `../docs/DISCREPANCIES.md` and the fork `.lean` docstrings against the new tag,
-   along with the recorded divergences themselves (the spec text may have moved
-   or fixed the branch a divergence pins).
-4. Sweep every doc for citations of the old tag (`grep -rn '<old-tag>'`); the
+   `../docs/IMPLEMENTATION_NOTES.md`, `../docs/DISCREPANCIES.md`, and the fork
+   `.lean` docstrings against the new tag.
+4. Re-check each recorded divergence itself (`IMPLEMENTATION_NOTES.md`, the
+   per-fork divergence entries): the new spec text may have moved, or may have
+   fixed the branch a divergence pins.
+5. Sweep every doc for citations of the old tag (`grep -rn '<old-tag>'`); the
    alpha.10→alpha.11 bump left six behind.
-5. Diff the corpus for new runners or handlers (new directories under
+6. Diff the corpus for new runners or handlers (new directories under
    `tests/<preset>/<fork>/`); either collect them or name the exclusion in the
    `IN_SCOPE_RUNNERS` allowlist comment, never leave one silently uncollected.
 

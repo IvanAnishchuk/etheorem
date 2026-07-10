@@ -5,10 +5,11 @@ import EthCLSpecs.Gloas.Containers
 # `EthCLSpecs.Heze.Inherited`: the inherited containers (everything but the new IL family)
 
 At alpha.11 EIP-7805 adds only the `InclusionList` family; every other Heze container is
-byte-identical to Gloas, so each is `inherit`ed (the capture replays the ancestor's
-field block in `EthCLSpecs.Heze`, giving a fresh twin with the same SSZ encoding). The
-bid, `ExecutionRequests`, and the ePBS containers are Gloas's; the component containers
-walk the lineage to Fulu's captures. `BeaconState` / `BeaconBlock*` are inherited in
+byte-identical to Gloas, so each is `inherit`ed: the ancestor's field block is re-declared
+in `EthCLSpecs.Heze`, giving a distinct type with the same SSZ encoding (the inheritance
+mechanism, `SPEC_AUTHORING_MODEL.md` §8). The bid, `ExecutionRequests`, and the ePBS
+containers come from Gloas; the component containers resolve through Gloas back to the
+definitions captured in Fulu. `BeaconState` / `BeaconBlock*` are inherited in
 `State` / `Block` (they need the `state_preamble` / signed-wrapper steps).
 -/
 

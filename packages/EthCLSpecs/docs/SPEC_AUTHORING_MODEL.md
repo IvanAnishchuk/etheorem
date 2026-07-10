@@ -629,7 +629,8 @@ fork must provide, with fixed signatures, expressed as a typeclass the fork
 instantiates. The entry points are `stateTransition`, `processSlots`, the
 individual `process_*` steps and operation handlers, the reward and penalty
 delta functions, the `on_*` fork-choice handlers,
-`initializeBeaconStateFromEth1`, and `upgradeToGloas`. Each entry point is
+`initializeBeaconStateFromEth1`, and the fork upgrade (`upgradeToGloas`,
+`upgradeToHeze`). Each entry point is
 independently invocable, so a single-operation vector can drive a single handler
 without running a whole block.
 

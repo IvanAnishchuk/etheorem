@@ -44,11 +44,13 @@ IN_SCOPE_RUNNERS = {
     "rewards", "genesis", "fork", "transition", "fork_choice", "ssz_static",
 }
 
-# The `checks` keys `_build_fork_choice_request` models (its emitter chain) and,
-# for nested check objects, the subkeys each emitter reads. Keep both in lockstep
-# with the emitter chain: a key handled there but missing here emits a spurious
-# `unsupported <key>` line and silently demotes a fully-checked case to the
-# todo/xfail bucket.
+# The `checks` keys `_build_fork_choice_request` recognizes. Most are modeled by
+# its emitter chain; `should_override_forkchoice_update` is recognized but
+# deliberately emitted as `unsupported` (the case lands todo/xfail).
+# KNOWN_CHECK_SUBKEYS below lists, for the nested check objects, the subkeys
+# each emitter reads. Keep both sets in lockstep with the emitter chain: a key
+# the chain handles but this set omits emits a spurious `unsupported <key>`
+# line and silently demotes a fully-checked case to the todo/xfail bucket.
 KNOWN_CHECK_KEYS = {
     "get_proposer_head", "should_override_forkchoice_update", "head",
     "payload_timeliness_vote", "payload_data_availability_vote",

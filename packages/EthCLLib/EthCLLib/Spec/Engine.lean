@@ -2,19 +2,20 @@
 # `EthCLLib.Spec.Engine`: the `[ExecutionEngine]` seam
 
 The spec's `ExecutionEngine` predicates are Engine-API calls answered by an
-external execution layer, so their verdicts are EL-implementation-defined and
-cannot be modeled as fixed values without hiding the trust boundary. Like
-`[CryptoBackend]` one file over, this seam lets a consumer swap the backend at
-the call boundary: the default instance below is the optimistic always-`true`
-mock (every conformance path stays on the accepting branch with no call-site
-change), and a test supplies a refuting local instance to drive the
-discriminating `false` branch.
+external execution layer (EL), so their verdicts are EL-implementation-defined
+and cannot be modeled as fixed values without hiding the trust boundary. Like
+`[CryptoBackend]` one file over, this is an injection seam, a typeclass
+boundary where the consumer picks the implementation (`FRAMEWORK_ARCHITECTURE.md`
+§1): the default instance below is the optimistic always-`true` mock (every
+conformance path stays on the accepting branch with no call-site change), and
+a test supplies a local instance returning `false` to exercise the rejecting
+branch.
 
-Unlike `CryptoBackend`, whose currency is raw `ByteArray` wire buffers, the
-engine predicates take the fork's own SSZ types. `ExecutionPayload` is a
-fork-namespaced twin (nominally distinct per fork); `Transaction` is today a
-single shared abbrev, parameterized here anyway so a fork that ever twins it
-needs no seam change. The class is generic over both; the optimistic instance
+`CryptoBackend` works on raw `ByteArray` wire buffers; the engine predicates
+instead take the fork's own SSZ types. `ExecutionPayload` is re-declared per
+fork namespace, each fork's copy a nominally distinct type; `Transaction` is
+today a single shared abbrev, parameterized here anyway so a fork that ever
+re-declares it needs no seam change. The class is generic over both; the optimistic instance
 is generic too, so every fork resolves it without per-fork glue, and a local
 `letI` at one fork's concrete types overrides it where a test needs the
 refuting branch.

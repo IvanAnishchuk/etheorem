@@ -178,8 +178,8 @@ private def handleForkChoice (iface : ForkInterface) (fields : Array String) : I
   match iface.runForkChoice anchorState anchorBlock steps with
   | .ok ()   => return "pass\tpassing\t"
   | .error e =>
-    -- Classify the runner error: a `spec todo` is the xfail work-queue, a `spec
-    -- outOfScope` a deliberate skip, everything else (a
+    -- Classify the runner error: a `spec todo` means unfinished work (reported `xfail`), a
+    -- `spec outOfScope` means deliberately unmodeled (reported `skip`); everything else (a
     -- decode failure, a check mismatch, an unexpected rejection, a missing store key) is
     -- a bug on the fork-choice path (per-step `valid:false` rejections are resolved inside
     -- the interpreter and never reach here).
@@ -288,8 +288,8 @@ def main (args : List String) : IO UInt32 := do
       match EthCLSpecs.Fulu.Interface.fuluInterface.stateRoot bytes with
       | .ok root => IO.println (EthCLSpecs.PySpecTests.toHex root); return 0
       | .error e => IO.eprintln s!"decode failed: {repr e}"; return 1
-  -- `fork` is a registered token of the spec DSL (the `forkstruct` family), so the
-  -- binder is `forkName`, matching the serve arms below.
+  -- The pattern binder cannot be named `fork`, because `fork` is a keyword of the spec
+  -- DSL; use `forkName`, as in the serve arms below.
   | ["stateroot", forkName, path] =>
     match EthCLSpecs.PySpecTests.forkInterface? forkName with
     | none => IO.eprintln s!"unknown fork: {forkName} (expected fulu / gloas / heze)"; return 2

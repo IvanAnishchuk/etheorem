@@ -5,7 +5,8 @@ import EthCLSpecs.Gloas.EpochProcessing
 # `EthCLSpecs.Heze.EpochProcessing`: the inherited epoch substeps (Gloas over Heze state)
 
 EIP-7805 (FOCIL) changes no epoch processing. Every Gloas epoch substep and accessor is
-`inherit`ed here verbatim: each captured Gloas/Fulu `forkdef` re-elaborates in the Heze
+`inherit`ed here verbatim: each captured Gloas/Fulu `forkdef` (the DSL stores every
+`forkdef`'s source for inheritance; `SPEC_AUTHORING_MODEL.md` §8) re-elaborates in the Heze
 namespace against `Heze.State` (`= SSZ.Box _ Heze.BeaconState`), its sibling calls
 rebinding to the Heze copies. No substep body is restated. The order matches Gloas's so
 each callee is declared before its caller.

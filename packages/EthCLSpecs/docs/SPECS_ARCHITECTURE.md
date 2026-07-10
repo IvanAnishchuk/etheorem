@@ -6,7 +6,7 @@ it, for the Lean 4 consensus-spec library. It sits above its two siblings.
 author writes and what the framework supplies, carries the canonical glossary,
 and states the author/framework boundary table. `FRAMEWORK_ARCHITECTURE.md`
 builds each "framework generates" cell of that table from below. This document
-uses both from the author's side: it shows how the Fulu and Gloas specs are
+uses both from the author's side: it shows how the Fulu, Gloas, and Heze specs are
 organized, ported, tested, and eventually proved, written against the contract
 and on top of the machinery. Read `SPEC_AUTHORING_MODEL.md` first. This document
 quotes its glossary rather than re-coining terms, and cross-references both
@@ -64,7 +64,7 @@ Both `minimal` and `mainnet` presets are supported from the start, through the
 preset tier system that `FRAMEWORK_ARCHITECTURE.md` builds in its
 preset-constant-config-tier-system section. Minimal comes first for fast
 iteration: its smaller vector widths and shorter epochs make a failing vector
-quick to reproduce. Mainnet vectors exist for both forks and run on demand rather
+quick to reproduce. Mainnet vectors exist for all three forks and run on demand rather
 than on every push, since they are slower. The preset machinery carries both from
 day one, so mainnet is a CI-schedule choice, never a missing capability.
 
@@ -833,15 +833,15 @@ interface and `PySpecTests`, written once and fork-agnostic, runs every format.
 | `rewards/*` | a single delta function | yes |
 | `fork_choice` | the `on_*` handlers | yes |
 | `genesis` | `initializeBeaconStateFromEth1` | yes |
-| `fork` | `upgradeToGloas` | yes (Fulu to Gloas only) |
-| `transition` | `stateTransition` with `upgradeToGloas` mid-fold | yes (Fulu to Gloas only) |
-| `ssz_static` | each container's `SSZRepr` (decode, hash-tree-root, round-trip) | yes (Fulu + Gloas) |
+| `fork` | `upgradeToGloas` / `upgradeToHeze` | yes (Fulu→Gloas, Gloas→Heze) |
+| `transition` | `stateTransition` with the upgrade mid-fold | yes (Fulu→Gloas, Gloas→Heze) |
+| `ssz_static` | each container's `SSZRepr` (decode, hash-tree-root, round-trip) | yes (Gloas + Heze; Fulu via SizzLean) |
 | `bls`, `kzg` | n/a | no (crypto-backend concern) |
 
 The `rewards/*` format is in scope and drives a single delta function in isolation,
 the reward and penalty deltas of the `Rewards` concern file (row 29). `fork` and
-`transition` run only the Fulu-to-Gloas upgrade, since Electra is not built. Both
-presets run; mainnet runs on demand rather than on every CI pass.
+`transition` run the Fulu-to-Gloas and Gloas-to-Heze upgrades only, since Electra is
+not built. Both presets run; mainnet runs on demand rather than on every CI pass.
 
 ### 10.2 The reject-faithfulness audit
 
@@ -927,7 +927,7 @@ unreleased. Forks can sit at different pins at the same time.
 The values below are illustrative and are bumped to the current latest release at
 implementation time (the pytest harnesses pin `v1.7.0-alpha.11` at this writing);
 the implementation also confirms the chosen tag
-actually carries Gloas vectors, falling back to a dev commit if not.
+actually carries the newest ported fork's vectors, falling back to a dev commit if not.
 
 ```lean
 namespace EthCLSpecs.Fulu
