@@ -490,24 +490,35 @@ forkdef onAttesterSlashing (asl : AttesterSlashing) : StoreTransition Unit := do
 
 /-! ## get_forkchoice_store -/
 
-/-- `get_forkchoice_store(anchor_state, anchor_block)`. The anchor block's root is
-computed from the (state-root-filled) anchor block. -/
-forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) : Store map :=
+/-- `get_forkchoice_store(anchor_state, anchor_block)`
+(`consensus-specs/specs/phase0/fork-choice.md:215-216`). The pyspec opens with
+`assert anchor_block.state_root == hash_tree_root(anchor_state)`, the anchor's
+self-consistency check, so the seed is a throwing `Except StoreTransitionError` action rather
+than a total store literal. The reject branch is vectorless (the harness derives the anchor
+block and state from one vector, so `state_root` always matches); Heze's `pinAnchorRejects`
+locks the identical assert, and this Fulu constructor carries it verbatim. The anchor block's
+root is computed from the (state-root-filled) anchor block. -/
+forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) :
+    Except StoreTransitionError (Store map) := do
+  -- `anchor_block.state_root == hash_tree_root(anchor_state)`: the boxed state hashes
+  -- through `stateRoot` (the cached-tree path), not `htr` (which wants a bare `SSZRepr`).
+  assert (anchorBlock.stateRoot == bytesToRoot (stateRoot anchorState).1)
   let anchorRoot := htr anchorBlock
   let epoch := currentEpochOf anchorState
   let cp : Checkpoint := { epoch := epoch, root := anchorRoot }
-  { time := (sszGet anchorState genesisTime) + Const.secondsPerSlot * (sszGet anchorState slot)
-    genesisTime := sszGet anchorState genesisTime
-    justifiedCheckpoint := cp, finalizedCheckpoint := cp
-    unrealizedJustifiedCheckpoint := cp, unrealizedFinalizedCheckpoint := cp
-    proposerBoostRoot := fcZeroRoot
-    equivocatingIndices := #[]
-    blocks := FcMap.insert FcMap.empty anchorRoot anchorBlock
-    blockStates := FcMap.insert FcMap.empty anchorRoot anchorState
-    blockTimeliness := FcMap.empty
-    checkpointStates := FcMap.insert FcMap.empty cp anchorState
-    latestMessages := FcMap.empty
-    unrealizedJustifications := FcMap.insert FcMap.empty anchorRoot cp }
+  pure
+    { time := (sszGet anchorState genesisTime) + Const.secondsPerSlot * (sszGet anchorState slot)
+      genesisTime := sszGet anchorState genesisTime
+      justifiedCheckpoint := cp, finalizedCheckpoint := cp
+      unrealizedJustifiedCheckpoint := cp, unrealizedFinalizedCheckpoint := cp
+      proposerBoostRoot := fcZeroRoot
+      equivocatingIndices := #[]
+      blocks := FcMap.insert FcMap.empty anchorRoot anchorBlock
+      blockStates := FcMap.insert FcMap.empty anchorRoot anchorState
+      blockTimeliness := FcMap.empty
+      checkpointStates := FcMap.insert FcMap.empty cp anchorState
+      latestMessages := FcMap.empty
+      unrealizedJustifications := FcMap.insert FcMap.empty anchorRoot cp }
 
 end
 

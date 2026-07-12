@@ -432,31 +432,39 @@ inherit onAttesterSlashing
 `[New in Heze:EIP7805]` fields seeded empty: `payloadInclusionListSatisfaction` as an empty
 map (`fork-choice.md:165`) and `inclusionListStore` as the empty `InclusionListStore` (no
 spec counterpart; the spec's store is a process-lifetime singleton, folded into `Store` here,
-see the `InclusionListStore` docstring). The rest is Gloas verbatim. -/
-forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) : Store map :=
+see the `InclusionListStore` docstring). The rest is Gloas verbatim, including the opening
+`assert anchor_block.state_root == hash_tree_root(anchor_state)` (`fork-choice.md:141`), so the
+seed is a throwing `Except StoreTransitionError` action rather than a total store literal.
+`pinAnchorRejects` below locks the reject branch. -/
+forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) :
+    Except StoreTransitionError (Store map) := do
+  -- `anchor_block.state_root == hash_tree_root(anchor_state)`: the boxed state hashes
+  -- through `stateRoot` (the cached-tree path), not `htr` (which wants a bare `SSZRepr`).
+  assert (anchorBlock.stateRoot == bytesToRoot (stateRoot anchorState).1)
   let anchorRoot := htr anchorBlock
   let epoch := currentEpochOf anchorState
   let cp : Checkpoint := { epoch := epoch, root := anchorRoot }
 
-  { time := (sszGet anchorState genesisTime) + Const.slotDurationMs * (sszGet anchorState slot) / 1000
-    genesisTime := sszGet anchorState genesisTime
-    justifiedCheckpoint := cp, finalizedCheckpoint := cp
-    unrealizedJustifiedCheckpoint := cp, unrealizedFinalizedCheckpoint := cp
-    proposerBoostRoot := fcZeroRoot
-    equivocatingIndices := #[]
-    blocks := FcMap.insert FcMap.empty anchorRoot anchorBlock
-    blockStates := FcMap.insert FcMap.empty anchorRoot anchorState
-    blockTimeliness := FcMap.insert FcMap.empty anchorRoot #[true, true]
-    checkpointStates := FcMap.insert FcMap.empty cp anchorState
-    latestMessages := FcMap.empty
-    unrealizedJustifications := FcMap.insert FcMap.empty anchorRoot cp
-    payloads := FcMap.empty
-    payloadTimelinessVote := FcMap.empty
-    payloadDataAvailabilityVote := FcMap.empty
-    -- [New in Heze:EIP7805] seeded empty in lockstep with `payloads` above (the INVARIANT
-    -- note in `onExecutionPayloadEnvelope`: the two maps are always written together).
-    payloadInclusionListSatisfaction := FcMap.empty
-    inclusionListStore := InclusionListStore.empty }
+  pure
+    { time := (sszGet anchorState genesisTime) + Const.slotDurationMs * (sszGet anchorState slot) / 1000
+      genesisTime := sszGet anchorState genesisTime
+      justifiedCheckpoint := cp, finalizedCheckpoint := cp
+      unrealizedJustifiedCheckpoint := cp, unrealizedFinalizedCheckpoint := cp
+      proposerBoostRoot := fcZeroRoot
+      equivocatingIndices := #[]
+      blocks := FcMap.insert FcMap.empty anchorRoot anchorBlock
+      blockStates := FcMap.insert FcMap.empty anchorRoot anchorState
+      blockTimeliness := FcMap.insert FcMap.empty anchorRoot #[true, true]
+      checkpointStates := FcMap.insert FcMap.empty cp anchorState
+      latestMessages := FcMap.empty
+      unrealizedJustifications := FcMap.insert FcMap.empty anchorRoot cp
+      payloads := FcMap.empty
+      payloadTimelinessVote := FcMap.empty
+      payloadDataAvailabilityVote := FcMap.empty
+      -- [New in Heze:EIP7805] seeded empty in lockstep with `payloads` above (the INVARIANT
+      -- note in `onExecutionPayloadEnvelope`: the two maps are always written together).
+      payloadInclusionListSatisfaction := FcMap.empty
+      inclusionListStore := InclusionListStore.empty }
 
 /-- `get_inclusion_list_due_ms()` (`consensus-specs/specs/heze/fork-choice.md:242-243`):
 `get_slot_component_duration_ms(INCLUSION_LIST_DUE_BPS)`. `bpsDeadlineMs` (inherited from Gloas)
@@ -801,5 +809,21 @@ private def pinCollect (equiv : Array ValidatorIndex) (onlyTimely : Bool) : Arra
 -- Equivocator 6 is filtered out regardless of timeliness, leaving just {0xAA}.
 #guard (pinCollect #[6] false).size = 1
 #guard (pinCollect #[6] false).contains (pinTx 0xAA)
+
+/-- Vectorless reject pin for `get_forkchoice_store`'s opening assert
+(`assert anchor_block.state_root == hash_tree_root(anchor_state)`, `fork-choice.md:141`). The
+default block's all-zero `stateRoot` cannot equal `hash_tree_root` of the default state (a
+non-zero SHA-256 digest), so the seed takes the reject branch and returns `.error`;
+`toOption.isNone` reads that verdict. No conformance vector reaches the mismatch (the harness
+derives anchor block + state from one vector, so `state_root` always matches), so this pin is
+the only witness of the throw. Computes `hash_tree_root` (FFI `Sha256`) → `native_decide`. The
+Fulu and Gloas constructors carry the textually-identical assert. -/
+private def pinAnchorRejects : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  (getForkchoiceStore (SSZ.FastBox (default : @BeaconState minimal))
+      (default : @BeaconBlock minimal) (map := treeMap)).toOption.isNone
+example : pinAnchorRejects = true := by native_decide
 
 end EthCLSpecs.Heze

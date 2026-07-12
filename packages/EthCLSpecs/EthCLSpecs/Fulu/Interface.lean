@@ -285,7 +285,9 @@ private def runForkChoiceImpl (P : Preset) (C : Config) (anchorStateBytes anchor
   | .error _, _ => .error (.decode "fork_choice anchor state")
   | _, .error _ => .error (.decode "fork_choice anchor block")
   | .ok anchorState, .ok anchorBlock =>
-    RunError.ofSpec (fcInterpret P (getForkchoiceStore anchorState anchorBlock) steps)
+    RunError.ofSpec (do
+      let store ← getForkchoiceStore anchorState anchorBlock
+      fcInterpret P store steps)
 
 /-- The `ssz_static` per-type kernel: decode `bytes` as the container `T`, and on
 success return its hash-tree-root paired with whether re-serializing reproduces
