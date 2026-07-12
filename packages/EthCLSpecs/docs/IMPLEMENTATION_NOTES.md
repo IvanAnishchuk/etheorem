@@ -669,13 +669,18 @@ pinned version, which is also a git tag there.
   vector's files, so the branch is unreachable in conformance. The Gloas and Fulu
   constructors drop the identical assert.
 
-Two model-structure choices carry no behavioral difference on any reachable input:
+`get_inclusion_list_committee` (`heze/beacon-chain.md:95-110`) resamples the committee as
+`indices[i % len(indices)]`, which raises `ZeroDivisionError` on an empty concatenation. The
+accessor asserts the concatenation is non-empty and throws the fork-choice reject to match, so the
+read is faithful rather than the earlier total `getD` default. `pinCommitteeThrows`
+(`EthCLSpecs/Heze/ForkChoice.lean`) locks the throw, and the record pins run over a populated
+committee so their coverage stays live. A real beacon chain never reaches a zero-active-validator
+slot, so the throw is unreachable on every conformance vector. `cyclicSample`
+(`EthCLSpecs/Heze/Committees.lean`) keeps the wrap-around arithmetic, now with a caller that
+guarantees a non-empty source.
 
-- **`cyclicSample`** (`heze/beacon-chain.md:95-110`) resamples the committee as
-  `indices[i % len(indices)]`, which raises `ZeroDivisionError` on an empty
-  concatenation. The Lean read is total (`i % 0 = i`, then the `getD` default), and a
-  real beacon chain never reaches a zero-active-validator slot, so the branch is
-  unreachable (`EthCLSpecs/Heze/Committees.lean`).
+One model-structure choice carries no behavioral difference on any reachable input:
+
 - **The `InclusionListStore` rides inside the fork-choice `Store` as a field.** The
   spec keeps it as a process-lifetime singleton reached through
   `get_inclusion_list_store()` (`heze/inclusion-list.md:28-38`); this framework's fork
