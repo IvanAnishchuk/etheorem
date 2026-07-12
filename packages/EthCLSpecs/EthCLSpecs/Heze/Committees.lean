@@ -1,24 +1,20 @@
-import EthCLSpecs.Heze.EpochProcessing
+import EthCLSpecs.Fulu.Constants
 
 /-!
-# `EthCLSpecs.Heze.Committees`: the EIP-7805 (FOCIL) inclusion-list committee accessor
+# `EthCLSpecs.Heze.Committees`: the FOCIL inclusion-list committee resampling helper
 
-Heze inherits `Committees` from Fulu verbatim; this file adds the one new committee accessor
-EIP-7805 (FOCIL) introduces. `get_inclusion_list_committee` (the "Beacon state accessors" section,
-`consensus-specs/specs/heze/beacon-chain.md:95-110`) samples a fixed-size committee from the
-slot's beacon committees. It leans on accessors inherited over `Heze.State` in `EpochProcessing`
-(`getBeaconCommittee`, `getCommitteeCountPerSlot`, `computeEpochAtSlot`). FOCIL adds no state
-transition, so this is a pure accessor rather than a transition step.
-
-`get_inclusion_list_committee` is reached from the `on_execution_payload_envelope` vectors (via
-`get_inclusion_list_transactions`) but against an empty store, so the Python is the oracle. The
-accessor mirrors it branch-for-branch, and the build-enforced `#guard`s below pin the load-bearing
-cyclic resampling to values worked out by hand from the spec's list comprehension.
+EIP-7805 (FOCIL) adds one beacon-state accessor, `get_inclusion_list_committee`
+(`consensus-specs/specs/heze/beacon-chain.md:95-110`), which samples a fixed-size committee from the
+slot's beacon committees. That accessor lives in `Heze/ForkChoice.lean`, next to its sole caller
+`get_inclusion_list_transactions`: it throws the fork-choice reject on the spec's degenerate
+empty-committee read (`indices[i % 0]` raises `ZeroDivisionError`), so it belongs in the
+store-throwing monad rather than among the pure state accessors. This file holds the one piece
+factored out of it: `cyclicSample`, the wrap-around index fill, kept here so its arithmetic is
+unit-checkable by the `#guard`s below without building a whole `BeaconState`.
 -/
 
 set_option autoImplicit false
 
-open EthCLLib.Spec
 open EthCLSpecs.Fulu
 
 namespace EthCLSpecs.Heze
@@ -28,11 +24,10 @@ result: element `i` is `xs[i % xs.size]`, wrapping back to the front once `i` pa
 of the concatenated committees (the spec's `indices[i % len(indices)]`,
 `consensus-specs/specs/heze/beacon-chain.md:108-110`). Factored out of the accessor so the
 wrap-around index arithmetic is unit-checkable below without building a whole `BeaconState`.
-`xs.getD … default` is total via `[Inhabited α]`; on the spec path `xs` is the non-empty committee
-concatenation, so `i % xs.size < xs.size` and `getD` always returns a real element. The `default`
-fallback covers only the unreachable empty-`xs` case (a state a real beacon chain never reaches),
-which `getD` returns silently rather than panicking to stderr as `xs[…]!` would. -/
-private def cyclicSample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) : Vector α n :=
+`xs.getD … default` is total via `[Inhabited α]`; the sole caller (`getInclusionListCommittee`
+in `Heze/ForkChoice.lean`) asserts `indices.size != 0` before reaching here, so on every path
+`xs` is non-empty, `i % xs.size < xs.size`, and `getD` always returns a real element. -/
+def cyclicSample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) : Vector α n :=
   Vector.ofFn (fun i : Fin n => xs.getD (i.val % xs.size) default)
 
 -- Pins for the cyclic resampling, expected values computed by hand from the Python
@@ -44,30 +39,5 @@ private def cyclicSample {α : Type} [Inhabited α] (xs : Array α) (n : Nat) : 
   = [10, 20, 30, 10, 20, 30, 10, 20]
 #guard (cyclicSample (#[7, 8] : Array UInt64) Const.inclusionListCommitteeSize).toList
   = [7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8, 7, 8]
-
--- `state_section` is the framework's header macro (`SPEC_AUTHORING_MODEL.md` §4): it opens
--- the section and emits the `variable` line, `[Preset]` / `[Config]` / `[HasherTag]` /
--- `[CryptoBackend]` plus the `StateTransition` monad variable and its constraints, which the
--- `forkdef`s below take implicitly (`EthCLLib.Spec.Header`).
-state_section
-
-/-- `get_inclusion_list_committee(state, slot)` (EIP-7805,
-`consensus-specs/specs/heze/beacon-chain.md:95-110`): concatenate every beacon committee for
-`slot` in committee-index order, then take the first `INCLUSION_LIST_COMMITTEE_SIZE` members
-cyclically. Mirrors the Python branch-for-branch: `epoch = compute_epoch_at_slot(slot)`, the
-`range(committees_per_slot)` accumulation that `extend`s each `get_beacon_committee`, and the
-`indices[i % len(indices)]` `Vector` fill (here `cyclicSample`). `get_beacon_committee` takes
-a `Nat` committee index in this framework, so the loop counter `i` is passed directly; the
-Python `CommitteeIndex(i)` wrapper is the same value. The degenerate empty-committee read is
-total here where the Python would raise; `cyclicSample` above carries the mechanics. -/
-forkdef getInclusionListCommittee (state : State) (slot : Slot) :
-    Vector ValidatorIndex Const.inclusionListCommitteeSize :=
-  let epoch := computeEpochAtSlot slot
-  let committeesPerSlot := getCommitteeCountPerSlot state epoch
-  let indices := (Array.range committeesPerSlot).foldl
-    (fun acc i => acc ++ getBeaconCommittee state slot i) (#[] : Array ValidatorIndex)
-  cyclicSample indices Const.inclusionListCommitteeSize
-
-end
 
 end EthCLSpecs.Heze

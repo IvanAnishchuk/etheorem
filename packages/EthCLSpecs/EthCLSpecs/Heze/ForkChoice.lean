@@ -185,6 +185,24 @@ forkdef processInclusionList (store : InclusionListStore map) (inclusionList : I
           inclusionLists := FcMap.insert store.inclusionLists key stored',
           inclusionListTimeliness := FcMap.insert store.inclusionListTimeliness inclusionListRoot isTimely }
 
+/-- `get_inclusion_list_committee(state, slot)` (EIP-7805,
+`consensus-specs/specs/heze/beacon-chain.md:95-110`): concatenate every beacon committee for
+`slot` in committee-index order, then take the first `INCLUSION_LIST_COMMITTEE_SIZE` members
+cyclically (`cyclicSample`, in `Heze/Committees.lean`). Relocated from the beacon-state accessors
+into this store-throwing block beside its sole caller `getInclusionListTransactions`: the spec's
+`indices[i % len(indices)]` raises `ZeroDivisionError` when the slot has no committee members, so
+`assert (indices.size != 0)` throws the fork-choice reject rather than silently sampling a
+`default`. `state` stays an explicit parameter (the accessor reads `state`, not the store), and
+the block's `[MonadExceptOf StoreTransitionError]` resolves `assert` to the store reject. -/
+forkdef getInclusionListCommittee (state : State) (slot : Slot) :
+    StoreTransition (Vector ValidatorIndex Const.inclusionListCommitteeSize) := do
+  let epoch := computeEpochAtSlot slot
+  let committeesPerSlot := getCommitteeCountPerSlot state epoch
+  let indices := (Array.range committeesPerSlot).foldl
+    (fun acc i => acc ++ getBeaconCommittee state slot i) (#[] : Array ValidatorIndex)
+  assert (indices.size != 0)
+  pure (cyclicSample indices Const.inclusionListCommitteeSize)
+
 /-- `get_inclusion_list_transactions(store, state, slot, only_timely=True)`
 (`consensus-specs/specs/heze/inclusion-list.md:95-114`): the unique transactions from every
 valid, non-equivocating inclusion list whose committee root matches the one `state`/`slot`
@@ -194,17 +212,13 @@ that key, then run the comprehension (here `collectInclusionListTransactions`). 
 `Array` for the spec's `Sequence[Transaction]`; the dedup leaves order unspecified, as the
 spec notes. -/
 forkdef getInclusionListTransactions (store : InclusionListStore map) (state : State)
-    (slot : Slot) (onlyTimely : Bool := true) : StoreTransition (Array Transaction) :=
-  let committee := getInclusionListCommittee state slot
+    (slot : Slot) (onlyTimely : Bool := true) : StoreTransition (Array Transaction) := do
+  let committee ← getInclusionListCommittee state slot
   let key := htr committee
   -- `inclusion_lists` and `equivocators` are `DefaultDict`s (inclusion-list.md:31,35): the
   -- spec's `[key]` auto-creates an empty entry on a miss, so the defaults here are faithful.
   let inclusionLists := (FcMap.lookup store.inclusionLists key).getD FcMap.empty
   let equivocators := FcMap.lookupD store.equivocators key
-  -- TODO(#6): `getInclusionListCommittee`'s empty-committee `indices[i % 0]` (a spec
-  -- `ZeroDivisionError`) is still modeled total. Making it throw reworks the record pins to a
-  -- non-empty-committee state, so it lands as a focused follow-up. The `timeliness` plain-`Dict`
-  -- read is now faithful: `collectInclusionListTransactions` below throws on a miss.
   collectInclusionListTransactions inclusionLists equivocators store.inclusionListTimeliness onlyTimely
 
 end
@@ -557,29 +571,60 @@ private def pinIlDueMs : UInt64 :=
   getInclusionListDueMs
 #guard pinIlDueMs = 4000
 
+/-- The faithful empty-committee throw. Over a zero-validator `default BeaconState` (at `slot :=
+1`, so the `state.slot != 0` underflow assert passes), `slot - 1`'s beacon committee is empty, so
+`getInclusionListCommittee` (reached through the record path) hits `assert (indices.size != 0)`
+and rejects. Pyspec raises `ZeroDivisionError` on the same `indices[i % 0]`. This pins the throw
+that the populated `pinRecordSatisfied` / `pinRecordRefuted` below deliberately avoid. `State` is
+FFI-backed (`FastBox`), so `native_decide`. -/
+private def pinCommitteeThrows : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Heze.BeaconState minimal) with slot := 1 })
+  let store := pinPilsStore false none
+  match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
+      (default : @EthCLSpecs.Heze.ExecutionPayload minimal) : PinM (Store treeMap)).run store with
+  | .ok _ _    => false
+  | .error _ _ => true
+example : pinCommitteeThrows = true := by native_decide
+
+/-- A minimal populated `BeaconState`: `SLOTS_PER_EPOCH` active validators at `slot := 1`. Enough
+that slot-0's beacon committee is non-empty (`computeCommittee` takes the shuffled slice
+`[0, N // SLOTS_PER_EPOCH) = [0, 1)`), so the record path's `getInclusionListCommittee` clears its
+`assert (indices.size != 0)` instead of throwing. A `default` validator has `exitEpoch = 0`, hence
+inactive, so only `exitEpoch := farFutureEpoch` is overridden (`is_active_validator` needs
+`activationEpoch ≤ epoch < exitEpoch`, and `activationEpoch` is already `0`). Effective balance is
+irrelevant here: `computeCommittee` is a plain shuffled slice, not balance-weighted. The registry
+is pushed onto the empty `base.validators` so the `SSZList` element type is inferred, never spelled.
+-/
+private def pinPopulatedState : @EthCLSpecs.Heze.BeaconState minimal :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  let base := (default : @EthCLSpecs.Heze.BeaconState minimal)
+  let activeValidator : Validator := { (default : Validator) with exitEpoch := Const.farFutureEpoch }
+  let vals := (Array.replicate Const.slotsPerEpoch activeValidator).foldl (·.push ·) base.validators
+  { base with slot := 1, validators := vals }
+
 /-- `record_payload_inclusion_list_satisfaction` records the engine verdict at `root`: with
-the optimistic default (`isInclusionListSatisfied = true`) it writes `true`. The slot-0
-`state` also sends execution down the underflow-guard branch (no previous slot, so the
-required set is empty and `getInclusionListTransactions` is never reached). Note the pinned
-value alone does not discriminate that guard: with an empty store and the optimistic oracle
-the verdict is `true` either way. What this pin fixes is the record path writing the verdict
-at the right key.
+the optimistic default (`isInclusionListSatisfied = true`) it writes `true`. `slot := 1` clears the
+faithful `state.slot != 0` underflow assert, and the populated validator set (`pinPopulatedState`)
+gives `slot - 1` a non-empty beacon committee, so the record path runs end-to-end through
+`getInclusionListCommittee` without hitting its empty-committee throw. The recorded verdict is
+`true` regardless of the required transactions (the optimistic oracle ignores `ilTxs`), so what
+this pin fixes is the record path writing the verdict at the right key.
 
 Lean mechanics: the forkdef wants the boxed `State` (`State = SSZ.Box HasherTag.H
-BeaconState`), so `state` is a `FastBox` of the default minimal `BeaconState`. `FastBox` is
+BeaconState`), so `state` is a `FastBox` of `pinPopulatedState`. `FastBox` is
 FFI-backed, so this is a `native_decide` `example` (`Lean.ofReduceBool`). -/
 private def pinRecordSatisfied : Option Bool :=
   letI : Preset := minimal
   letI : Config := minimalConfig
   letI : HasherTag := fastHasherTag
-  -- Slot 1 (not 0): the faithful `assert state.slot != 0` passes, and `state.slot - 1 = 0`
-  -- with an empty inclusion-list store yields an empty required set, so the optimistic oracle
-  -- still records `true` — now exercised through the (throwing) record path.
-  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Heze.BeaconState minimal) with slot := 1 })
+  let state : State := SSZ.FastBox pinPopulatedState
   let store := pinPilsStore false none
   match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
-      (default : @EthCLSpecs.Heze.ExecutionPayload minimal) :
-      EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) (Store treeMap)).run store with
+      (default : @EthCLSpecs.Heze.ExecutionPayload minimal) : PinM (Store treeMap)).run store with
   | .ok after _ => FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot
   | .error _ _  => none
 example : pinRecordSatisfied = some true := by native_decide
@@ -598,19 +643,18 @@ private def pinRecordRefuted : Option Bool × Bool :=
   letI : HasherTag := fastHasherTag
   letI : ExecutionEngine (@EthCLSpecs.Heze.ExecutionPayload minimal) Transaction :=
     { isInclusionListSatisfied := fun _ _ => false }
-  -- Slot 1 so the faithful underflow assert passes (see `pinRecordSatisfied`).
-  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Heze.BeaconState minimal) with slot := 1 })
+  -- Slot 1 clears the faithful underflow assert and the populated set clears the empty-committee
+  -- throw (see `pinRecordSatisfied` / `pinPopulatedState`).
+  let state : State := SSZ.FastBox pinPopulatedState
   let store := pinPilsStore true none
-  Id.run do
-    match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
-        (default : @EthCLSpecs.Heze.ExecutionPayload minimal) :
-        EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) (Store treeMap)).run store with
-    | .error _ _  => return (none, false)
-    | .ok after _ =>
-      match (isPayloadInclusionListSatisfied (map := treeMap) after pinPilsRoot :
-          EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) Bool).run after with
-      | .ok gate _  => return (FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot, gate)
-      | .error _ _  => return (FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot, false)
+  match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
+      (default : @EthCLSpecs.Heze.ExecutionPayload minimal) : PinM (Store treeMap)).run store with
+  | .error _ _  => (none, false)
+  | .ok after _ =>
+    let recorded := FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot
+    match (isPayloadInclusionListSatisfied (map := treeMap) after pinPilsRoot : PinM Bool).run after with
+    | .ok gate _  => (recorded, gate)
+    | .error _ _  => (recorded, false)
 -- refuting oracle ⇒ recorded `false`, and the gate rejects the verified payload.
 example : pinRecordRefuted = (some false, false) := by native_decide
 

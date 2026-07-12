@@ -18,9 +18,11 @@ re-instantiation, pulled in via `Interface`, and the fork-interface drives every
 runner. The as-built divergence catalogue is `IMPLEMENTATION_NOTES.md`, "Heze diff".
 
 The FOCIL functions land in concern files, following the ePBS shape rather than a per-feature
-file. `get_inclusion_list_committee` sits with the committee accessors (`Committees`);
-`is_valid_inclusion_list_signature` with the signing surface (`Signing`); the `InclusionListStore`
-and its three helpers with fork choice (`ForkChoice`), folded into the fork-choice `Store`.
+file. `get_inclusion_list_committee` sits in the store-throwing fork-choice block
+(`ForkChoice`, beside its sole caller; `Committees` keeps its unit-checkable `cyclicSample`
+core); `is_valid_inclusion_list_signature` with the signing surface (`Signing`); the
+`InclusionListStore` and its three helpers with fork choice (`ForkChoice`), folded into the
+fork-choice `Store`.
 
 The fork choice (`ForkChoice`) is Gloas's with the EIP-7805 inclusion-list layer added: the
 `InclusionListStore` and its three helpers, folded into the fork-choice `Store`, the
