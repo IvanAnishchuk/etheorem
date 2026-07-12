@@ -289,11 +289,11 @@ inherit isPreviousSlotPayloadDecision
 /-- `is_payload_inclusion_list_satisfied(store, root)`
 (`consensus-specs/specs/heze/fork-choice.md:199-212`): whether the payload for `root`
 satisfied the inclusion-list constraints and is locally available. The spec opens with
-`assert root in store.payload_inclusion_list_satisfaction`; a pure `Bool` predicate cannot
-throw, so a missing key reads as `false` through `lookupD` (the same default-on-miss the
-sibling `payloadTimeliness` uses). The default is unreachable on the spec path, because
-`onExecutionPayloadEnvelope` always writes `payloads` and the satisfaction entry together;
-the INVARIANT note there is the canonical statement of that argument. -/
+`assert root in store.payload_inclusion_list_satisfaction`; the predicate throws that `assert`
+on a missing key (`StoreTransition Bool`), matching the spec's reject. The assert is unreachable
+on the spec path, because `onExecutionPayloadEnvelope` always writes `payloads` and the
+satisfaction entry together; the INVARIANT note there is the canonical statement of that
+argument. -/
 forkdef isPayloadInclusionListSatisfied (store : Store map) (root : Root) : StoreTransition Bool := do
   -- The spec opens with `assert root in store.payload_inclusion_list_satisfaction`; that fires
   -- (rejecting) even when the payload is unverified, so it precedes the verified check. The

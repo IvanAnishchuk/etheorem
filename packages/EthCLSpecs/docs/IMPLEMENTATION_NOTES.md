@@ -425,8 +425,11 @@ on* : StoreTransition Unit` over the typed `StoreTransitionError`. They write th
 `assert` / `todo` the state machine uses (resolved to `StoreTransitionError` through
 `SpecReject` from the section's monad), `missingKey` for `FcMap` misses, and the inner
 `state_transition` runs through `runStateTransition` (`Spec/Assert.lean`, wrapping an inner
-failure as `StoreTransitionError.transition`). Queries and transforms stay pure
-`forkdef`s of the store. `ForkInterface.runForkChoice` returns `Except (RunError
+failure as `StoreTransitionError.transition`). In Fulu, queries and transforms stay pure
+`forkdef`s of the store, with `lookupD` defaults standing in for the spec's raising reads
+(the throw sweep that converted Gloas/Heze is still owed to Fulu); in Gloas/Heze the queries
+run in the throwing store monad too, so a plain-`Dict` miss rejects (`missingKey`) instead
+of defaulting. `ForkInterface.runForkChoice` returns `Except (RunError
 StoreTransitionError) Unit`, and `Server` classifies the typed reject (`.spec (.todo _)
 → todo`, everything else, a `decode` or any other spec reject, `→ bug`), so no `"TODO:"`
 string convention is involved. The `FcStep` wire
@@ -456,10 +459,15 @@ boost only when the block is timely, no boost is already set, and the block shar
 head's dependent root (`get_dependent_root`, gated by `MIN_SEED_LOOKAHEAD`), the v1.7
 rule.
 
-The linear DAG walks (`getAncestor`, the `getHead` descent, `advanceStoreTime`) route
-through the framework's pure `fuelIterate` (§12). The one tree walk, `filterBlockTree`,
-recurses over every child inside a fold, which a linear combinator cannot express, so it
-keeps a local fuel-bounded `where` helper. The totality the doc wants is met either way.
+The linear DAG walks route through fuel-bounded combinators (§12). In Gloas/Heze,
+`getAncestor` and the `getHead` descent read `store.blocks` as they go, so they thread the
+store monad through the throwing `fuelLoop`, rejecting a missing root with `missingKey` to
+match the spec's plain-`Dict` read; Fulu's walks are still the pure `fuelIterate` over
+`lookupD` defaults, the deferred Fulu half of the sweep. `advanceStoreTime`, which touches
+no map, stays on the pure `fuelIterate` in every fork. The one tree walk,
+`filterBlockTree`, recurses over every child inside a fold, which a linear combinator
+cannot express, so it keeps a local fuel-bounded `where` helper (monadic, for the same block
+read). The totality the doc wants is met either way.
 
 One framework-wide caveat, shared by all three forks: the inherited time arithmetic
 (`timeIntoSlotMs`, the store-time seed in `get_forkchoice_store`) wraps on `UInt64`
@@ -474,10 +482,13 @@ ePBS rewrite: `get_ancestor` / `is_ancestor` / `get_weight` / `get_node_children
 checks; the `FcStep` protocol grows the envelope / PTC-message steps. EIP-7732 genuinely
 differs here, so Gloas overrides most handlers rather than inheriting them, and the
 `forkstruct` / `inherit` reuse pays off less than it does for the state transition.
-Two spec asserts are dropped there as total-function shapes: `should_extend_payload`'s
-slot assert (its one caller enforces the same equation) and `get_forkchoice_store`'s
-anchor-root assert (Fulu's constructor drops it too). Heze inherits both shapes
-unchanged; the Heze diff below carries the detailed entries.
+The weight/head walk throws its plain-`Dict` reads and `should_extend_payload`'s slot
+assert faithfully, threading `StoreTransitionError` end to end (`get_weight`, `get_head`,
+`filter_block_tree`, the leaf reads, and `should_extend_payload`'s
+`store.blocks[root]` / `store.blocks[proposer_root]`). `get_forkchoice_store`'s anchor-root
+assert (`assert anchor_block.state_root == hash_tree_root(anchor_state)`) is still dropped, its
+constructor pure across all three forks. That is a known faithfulness gap pending conversion to a
+throw in this branch. Heze inherits these shapes; the Heze diff below carries the detailed entries.
 
 ## Fulu state transition
 
@@ -614,13 +625,16 @@ everything FOCIL-specific the pinned spec text is the oracle, backed by the
 build-enforced pins in `EthCLSpecs/Heze/ForkChoice.lean`: kernel `#guard`s (the
 kernel evaluates the check at build time) where the expected value needs no hashing,
 and `native_decide` examples (compiled evaluation, needed once a hash-tree-root calls
-the FFI hasher the kernel cannot reduce) where it does. Not every divergence below
+the FFI hasher the kernel cannot reduce) where it does. Not every entry below
 carries a discriminating pin; where one exists the entry names it, and the rest stand
 on unreachability arguments at their call sites.
 
-Deliberate divergences from the spec text follow. None is observable by any alpha.11
-vector. Spec citations resolve under `specs/` in `ethereum/consensus-specs` at the
-pinned version, which is also a git tag there.
+The entries below record each FOCIL read and assert and how it meets the spec. Most are
+faithful throws: the spec rejects (an `assert`, a plain-`Dict` `KeyError`, an `IndexError`, a
+`uint64` underflow) and the Lean throws to match, unreachable on any alpha.11 vector. Two are
+residual: the `[ExecutionEngine]` seam's optimistic default, and one dropped anchor-root assert
+held for the cross-fork audit. Spec citations resolve under `specs/` in `ethereum/consensus-specs`
+at the pinned version, which is also a git tag there.
 
 - **`is_inclusion_list_satisfied`** (`heze/fork-choice.md:54-62`) defers its verdict to
   `ExecutionEngine.is_inclusion_list_satisfied`, an Engine-API call against an external
@@ -630,44 +644,44 @@ pinned version, which is also a git tag there.
   the FOCIL gate. No conformance vector reaches the discriminating `false` branch; the
   `pinRecordRefuted` `native_decide` example drives it end-to-end under a locally
   substituted refuting engine instance.
-- **Two map reads default to `false` where the spec assumes the key present.**
+- **Two map reads throw on a missing key, matching the spec.**
   `is_payload_inclusion_list_satisfied` (`heze/fork-choice.md:199-212`) opens with
-  `assert root in store.payload_inclusion_list_satisfaction`; a pure `Bool` function
-  cannot throw, so the Lean reads a missing key as `false` (`lookupD`). A missing key
-  is unreachable when the spec's own invariant holds: `on_execution_payload_envelope`
-  writes `payloads` and `payload_inclusion_list_satisfaction` together, so the key is
-  present whenever `root ∈ payloads`. The `timeliness` read in
-  `get_inclusion_list_transactions` (`heze/inclusion-list.md:105-114`) is the same
-  pattern, with `process_inclusion_list` writing the stored list and its timeliness
-  entry together.
+  `assert root in store.payload_inclusion_list_satisfaction`; the Lean throws that `assert`
+  (`StoreTransition Bool`). The `timeliness` read in `get_inclusion_list_transactions`
+  (`heze/inclusion-list.md:105-114`) is a plain `Dict` (`inclusion-list.md:34`), so the Lean
+  `getOrThrow`s it (`missingKey`) in place of the old `lookupD false`. Both throws are unreachable
+  when the spec's own invariants hold: `on_execution_payload_envelope` writes `payloads` and
+  `payload_inclusion_list_satisfaction` together, so the satisfaction key is present whenever
+  `root ∈ payloads`; and `process_inclusion_list` writes each stored list with its timeliness
+  entry, so every stored `il_root` has one.
 - **`record_payload_inclusion_list_satisfaction`** (`heze/fork-choice.md:180-193`)
-  reads `Slot(state.slot - 1)`. On a slot-0 state the pyspec raises the uint64
-  underflow, which invalidates the whole `on_execution_payload_envelope` call with the
-  store unmodified; the Lean guards the underflow, records the verdict over an empty
-  required set, and proceeds. Only an envelope whose target block state sits at slot 0
-  (the genesis anchor) could tell the difference, and no vector produces one.
+  reads `Slot(state.slot - 1)`. On a slot-0 state the pyspec raises the uint64 underflow,
+  invalidating the whole `on_execution_payload_envelope` call with the store unmodified. The Lean
+  asserts `state.slot != 0` and throws to match, rather than substituting an empty required set.
+  Only an envelope whose target block state sits at slot 0 (the genesis anchor) could reach it,
+  and no vector produces one.
 - **`should_extend_payload`** (`heze/fork-choice.md:221-236`) opens with
-  `assert store.blocks[root].slot + 1 == get_current_slot(store)`; the Lean is a total
-  `Bool` function, so the assert is dropped. Its one caller
-  (`get_payload_status_tiebreaker`) is gated by `is_previous_slot_payload_decision`,
-  which enforces the same slot equation. Gloas drops the identical assert (see the Fork
-  choice section); Heze restates the body for the inclusion-list gate. In the same
-  function, the spec reads `store.blocks[proposer_root]` unguarded (a `KeyError` on a
-  boost root absent from `blocks`); the Lean's `| none => true` arm extends instead, a
-  default in the accepting direction, unreachable while the boost root is always a
-  stored block (`on_block` sets it).
+  `assert store.blocks[root].slot + 1 == get_current_slot(store)`; the Lean `getOrThrow`s
+  `blocks[root]` and throws that `assert` (`StoreTransition Bool`). Its one caller
+  (`get_payload_status_tiebreaker`) is gated by `is_previous_slot_payload_decision`, which
+  enforces the same slot equation, so the assert is unreachable in practice. Gloas throws the
+  identical assert (see the Fork choice section); Heze restates the body for the inclusion-list
+  gate. In the same function, the spec reads `store.blocks[proposer_root]` unguarded (a `KeyError`
+  on a boost root absent from `blocks`); the Lean `getOrThrow`s it, throwing to match, unreachable
+  while the boost root is always a stored block (`on_block` sets it).
 - **`is_valid_inclusion_list_signature`** (`heze/beacon-chain.md:76-87`) reads
-  `state.validators[message.validator_index]`, which raises `IndexError` on an
-  out-of-range wire index; the Lean bounds the index and returns `false` instead
-  (`EthCLSpecs/Heze/Signing.lean`). Same rejection, different mechanism; the predicate
-  has no in-model caller by design.
+  `state.validators[message.validator_index]`, which raises `IndexError` on an out-of-range wire
+  index; the Lean `sszGetIdx`s the index and throws `outOfBounds` to match
+  (`EthCLSpecs/Heze/Signing.lean`), rather than masking the raise as a `false`. The predicate has
+  no in-model caller by design.
 - **`get_forkchoice_store`** (`heze/fork-choice.md:140-166`) opens with
-  `assert anchor_block.state_root == hash_tree_root(anchor_state)`; the Lean
-  restatement is a pure constructor and drops it, so an inconsistent anchor pair would
-  seed a store instead of raising. Every fork_choice vector runs through this
-  constructor, but the harness always derives the anchor block and state from the same
-  vector's files, so the branch is unreachable in conformance. The Gloas and Fulu
-  constructors drop the identical assert.
+  `assert anchor_block.state_root == hash_tree_root(anchor_state)`; the Lean restatement is a pure
+  constructor and drops it, so an inconsistent anchor pair seeds a store instead of raising. Every
+  fork_choice vector runs through this constructor, and the harness always derives the anchor block
+  and state from the same vector's files, so no vector exercises the mismatch. The Gloas and Fulu
+  constructors drop the identical assert. This is a known faithfulness gap pending conversion in
+  this branch; a faithful throw needs the constructor threaded through the reject monad across all
+  three forks.
 
 `get_inclusion_list_committee` (`heze/beacon-chain.md:95-110`) resamples the committee as
 `indices[i % len(indices)]`, which raises `ZeroDivisionError` on an empty concatenation. The
