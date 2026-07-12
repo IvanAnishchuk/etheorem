@@ -178,8 +178,14 @@ forkdef getInclusionListTransactions (store : InclusionListStore map) (state : S
     (slot : Slot) (onlyTimely : Bool := true) : Array Transaction :=
   let committee := getInclusionListCommittee state slot
   let key := htr committee
+  -- `inclusion_lists` and `equivocators` are `DefaultDict`s (inclusion-list.md:31,35): the
+  -- spec's `[key]` auto-creates an empty entry on a miss, so the defaults here are faithful.
   let inclusionLists := (FcMap.lookup store.inclusionLists key).getD FcMap.empty
   let equivocators := FcMap.lookupD store.equivocators key
+  -- TODO(#6): still to make spec-faithful — the `timeliness[ilRoot]` plain-`Dict` read inside
+  -- `collectInclusionListTransactions` and `cyclicSample`'s empty-committee `i % 0` in
+  -- `getInclusionListCommittee` must throw (both are unreachable, but faithfulness is required).
+  -- Deferred only because converting them reworks their kernel `#guard` pins; next follow-up.
   collectInclusionListTransactions inclusionLists equivocators store.inclusionListTimeliness onlyTimely
 
 end
@@ -255,27 +261,42 @@ throw, so a missing key reads as `false` through `lookupD` (the same default-on-
 sibling `payloadTimeliness` uses). The default is unreachable on the spec path, because
 `onExecutionPayloadEnvelope` always writes `payloads` and the satisfaction entry together;
 the INVARIANT note there is the canonical statement of that argument. -/
-forkdef isPayloadInclusionListSatisfied (store : Store map) (root : Root) : Bool :=
-  isPayloadVerified store root && FcMap.lookupD store.payloadInclusionListSatisfaction root
+forkdef isPayloadInclusionListSatisfied (store : Store map) (root : Root) : StoreTransition Bool := do
+  -- The spec opens with `assert root in store.payload_inclusion_list_satisfaction`; that fires
+  -- (rejecting) even when the payload is unverified, so it precedes the verified check. The
+  -- later `[root]` read is then over a present key, so assert and read fuse into one
+  -- `getOrAssert` (an `.assert` reject on a miss).
+  let satisfied ← FcMap.getOrAssert store.payloadInclusionListSatisfaction root
+    "root in store.payload_inclusion_list_satisfaction"
+  if !isPayloadVerified store root then pure false
+  else pure satisfied
 
 /-- `should_extend_payload(store, root)` (Heze override,
 `consensus-specs/specs/heze/fork-choice.md:221-236`): the Gloas body with the one new
 inclusion-list gate. After the `is_payload_verified` check, a payload that fails the
 inclusion-list constraints is not extended (`fork-choice.md:226`). The rest is Gloas verbatim.
 -/
-forkdef shouldExtendPayload (store : Store map) (root : Root) : Bool :=
-  if !isPayloadVerified store root then false
+forkdef shouldExtendPayload (store : Store map) (root : Root) : StoreTransition Bool := do
+  -- Mirrors the (now-throwing) Gloas body plus the inclusion-list gate: the spec opens with
+  -- `assert store.blocks[root].slot + 1 == get_current_slot(store)`.
+  let rootBlock ← FcMap.getOrThrow store.blocks root
+  assert (rootBlock.slot + 1 == getCurrentSlot store)
+  if !isPayloadVerified store root then pure false
   -- [New in Heze:EIP7805] do not extend a payload that fails the inclusion-list constraints
-  else if !isPayloadInclusionListSatisfied store root then false
+  else if !(← isPayloadInclusionListSatisfied store root) then pure false
   else
     let proposerRoot := store.proposerBoostRoot
-    let payloadIsTimely := payloadTimeliness store root true
-    let payloadDataIsAvailable := payloadDataAvailability store root true
-    (payloadIsTimely && payloadDataIsAvailable)
-      || proposerRoot == fcZeroRoot
-      || (match FcMap.lookup store.blocks proposerRoot with
-          | some pb => pb.parentRoot != root || isParentNodeFull store pb
-          | none    => true)
+    let payloadIsTimely ← payloadTimeliness store root true
+    let payloadDataIsAvailable ← payloadDataAvailability store root true
+    if (payloadIsTimely && payloadDataIsAvailable) || proposerRoot == fcZeroRoot then
+      pure true
+    else
+      let pb ← FcMap.getOrThrow store.blocks proposerRoot
+      -- Python's final `or` short-circuits: `is_parent_node_full` (whose
+      -- `store.blocks[pb.parent_root]` read now throws) never runs when
+      -- `pb.parent_root != root` already decides the disjunction (Gloas parity).
+      if pb.parentRoot != root then pure true
+      else isParentNodeFull store pb
 
 inherit getPayloadStatusTiebreaker
 inherit committeeWeight
@@ -329,15 +350,15 @@ transactions are read for the previous slot (`state.slot - 1`) at the default `o
 True`, and the EL verdict comes from `isInclusionListSatisfied`, which reads the
 `[ExecutionEngine]` seam (the spec's `execution_engine` argument, modeled injectably). -/
 forkdef recordPayloadInclusionListSatisfaction (store : Store map) (state : State) (root : Root)
-    (payload : ExecutionPayload) : Store map :=
-  -- The spec reads `Slot(state.slot - 1)`, which assumes `state.slot ≥ 1` (a genesis/slot-0 state
-  -- never reaches a payload envelope). Guard the `UInt64` underflow explicitly: at slot 0 there is
-  -- no previous slot, so no inclusion-list transactions are required.
+    (payload : ExecutionPayload) : StoreTransition (Store map) := do
+  -- The spec reads `Slot(state.slot - 1)`, a `uint64` subtraction that raises on a slot-0
+  -- state (invalidating the whole envelope). Assert `state.slot != 0` rather than silently
+  -- substituting an empty required set.
   let stateSlot := sszGet state slot
-  let ilTxs := if stateSlot == 0 then #[]
-               else getInclusionListTransactions store.inclusionListStore state (stateSlot - 1)
+  assert (stateSlot != 0)
+  let ilTxs := getInclusionListTransactions store.inclusionListStore state (stateSlot - 1)
   let satisfied := isInclusionListSatisfied payload ilTxs
-  { store with
+  pure { store with
       payloadInclusionListSatisfaction := FcMap.insert store.payloadInclusionListSatisfaction root satisfied }
 
 /-- `on_execution_payload_envelope` (Heze override,
@@ -349,13 +370,14 @@ state from `verify_execution_payload_envelope` is kept only for `blockStates`. -
 forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) : StoreTransition Unit := do
   let store ← get
   let envelope := signedEnv.message
-  let state ← FcMap.getOrThrow store.blockStates envelope.beaconBlockRoot
+  let state ← FcMap.getOrAssert store.blockStates envelope.beaconBlockRoot
+    "envelope.beacon_block_root in store.block_states"
 
   match verifyExecutionPayloadEnvelope state signedEnv with
   | .error e => throw e
   | .ok warm =>
     -- [New in Heze:EIP7805] record whether the payload satisfies the inclusion-list constraints
-    let store := recordPayloadInclusionListSatisfaction store state envelope.beaconBlockRoot envelope.payload
+    let store ← recordPayloadInclusionListSatisfaction store state envelope.beaconBlockRoot envelope.payload
     -- INVARIANT: `payloads[root]` and `payloadInclusionListSatisfaction[root]` are written
     -- together here (the satisfaction key via `recordPayloadInclusionListSatisfaction` just
     -- above). Keep it that way: `isPayloadInclusionListSatisfied`'s default-false-on-miss is
@@ -440,6 +462,10 @@ The pin fixes the recorded bit by hand rather than through the engine, so the
 `isInclusionListSatisfied` verdict itself is out of its reach; `pinRecordRefuted` below
 drives that refuting branch through the record path into this gate. -/
 
+/-- The pins' concrete fork-choice monad: the minimal preset over the deterministic
+`treeMap` and the FFI hasher, the annotation every pin's `.run` otherwise repeats. -/
+private abbrev PinM := EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag)
+
 private def pinPilsRoot : Root := Vector.replicate 32 9
 
 /-- A minimal Heze `Store` exercising `isPayloadInclusionListSatisfied` at `pinPilsRoot`.
@@ -475,20 +501,24 @@ private def pinPilsStore (payloadPresent : Bool) (recorded : Option Bool) :
 /-- The predicate's verdict on `pinPilsStore payloadPresent recorded`. The `letI`s re-supply the
 preset / hasher the `forkdef` parameters want (Lean re-synthesizes them rather than reading the
 store's fixed type), the same pattern the `InclusionListStore` pins in this file use. -/
-private def pinPils (payloadPresent : Bool) (recorded : Option Bool) : Bool :=
+private def pinPils (payloadPresent : Bool) (recorded : Option Bool) : Option Bool :=
   letI : Preset := minimal
   letI : HasherTag := fastHasherTag
-  isPayloadInclusionListSatisfied (pinPilsStore payloadPresent recorded) pinPilsRoot
+  let store := pinPilsStore payloadPresent recorded
+  -- Run the now-throwing predicate concretely; `none` marks the `assert root ∈ …` reject.
+  match (isPayloadInclusionListSatisfied (map := treeMap) store pinPilsRoot : PinM Bool).run store with
+  | .ok b _    => some b
+  | .error _ _ => none
 
 -- verified + recorded `false` ⇒ `false` (do not extend this payload).
-#guard pinPils true (some false) = false
+#guard pinPils true (some false) = some false
 -- verified + recorded `true` ⇒ `true`.
-#guard pinPils true (some true) = true
+#guard pinPils true (some true) = some true
 -- unverified (root ∉ payloads) ⇒ `false`, even with the satisfaction bit recorded `true`.
-#guard pinPils false (some true) = false
--- verified but no recorded entry ⇒ `false` via the `lookupD` default (a state the spec's
--- own invariant rules out; the INVARIANT note in `onExecutionPayloadEnvelope`).
-#guard pinPils true none = false
+#guard pinPils false (some true) = some false
+-- verified but no recorded entry ⇒ the spec's `assert root ∈ payload_inclusion_list_satisfaction`
+-- now *rejects* (a state the invariant rules out) rather than reading a `lookupD` default.
+#guard pinPils true none = none
 
 /-! ### Build-enforced pins (vectorless): the FOCIL fork-choice helpers
 
@@ -523,10 +553,16 @@ private def pinRecordSatisfied : Option Bool :=
   letI : Preset := minimal
   letI : Config := minimalConfig
   letI : HasherTag := fastHasherTag
-  let state : State := SSZ.FastBox (default : @EthCLSpecs.Heze.BeaconState minimal)
-  let after := recordPayloadInclusionListSatisfaction (pinPilsStore false none) state pinPilsRoot
-    (default : @EthCLSpecs.Heze.ExecutionPayload minimal)
-  FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot
+  -- Slot 1 (not 0): the faithful `assert state.slot != 0` passes, and `state.slot - 1 = 0`
+  -- with an empty inclusion-list store yields an empty required set, so the optimistic oracle
+  -- still records `true` — now exercised through the (throwing) record path.
+  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Heze.BeaconState minimal) with slot := 1 })
+  let store := pinPilsStore false none
+  match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
+      (default : @EthCLSpecs.Heze.ExecutionPayload minimal) :
+      EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) (Store treeMap)).run store with
+  | .ok after _ => FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot
+  | .error _ _  => none
 example : pinRecordSatisfied = some true := by native_decide
 
 /-- The discriminating counterpart to `pinRecordSatisfied`: the same record path under a
@@ -543,11 +579,19 @@ private def pinRecordRefuted : Option Bool × Bool :=
   letI : HasherTag := fastHasherTag
   letI : ExecutionEngine (@EthCLSpecs.Heze.ExecutionPayload minimal) Transaction :=
     { isInclusionListSatisfied := fun _ _ => false }
-  let state : State := SSZ.FastBox (default : @EthCLSpecs.Heze.BeaconState minimal)
-  let after := recordPayloadInclusionListSatisfaction (pinPilsStore true none) state pinPilsRoot
-    (default : @EthCLSpecs.Heze.ExecutionPayload minimal)
-  (FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot,
-   isPayloadInclusionListSatisfied after pinPilsRoot)
+  -- Slot 1 so the faithful underflow assert passes (see `pinRecordSatisfied`).
+  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Heze.BeaconState minimal) with slot := 1 })
+  let store := pinPilsStore true none
+  Id.run do
+    match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
+        (default : @EthCLSpecs.Heze.ExecutionPayload minimal) :
+        EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) (Store treeMap)).run store with
+    | .error _ _  => return (none, false)
+    | .ok after _ =>
+      match (isPayloadInclusionListSatisfied (map := treeMap) after pinPilsRoot :
+          EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag) Bool).run after with
+      | .ok gate _  => return (FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot, gate)
+      | .error _ _  => return (FcMap.lookup after.payloadInclusionListSatisfaction pinPilsRoot, false)
 -- refuting oracle ⇒ recorded `false`, and the gate rejects the verified payload.
 example : pinRecordRefuted = (some false, false) := by native_decide
 

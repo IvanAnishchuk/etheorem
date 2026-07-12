@@ -232,6 +232,14 @@ private def runTransitionImpl (P : Preset) (C : Config) (forkVersion : Version)
           assert (sb.message.stateRoot == bytesToRoot root)
       RunError.ofSpec (runToRoot hezeBox0 hezeAction)
 
+/-- Run `getHead` over the snapshot store as a pure query (`runQuery` discards the final
+store; `getHead` only reads it). Shared by the `checkHead` / `checkHeadPayloadStatus` arms,
+which each need the head node against the current fold state. -/
+private def queryHead [Preset] [Config] [HasherTag] (store : Store hashMap) :
+    Except StoreTransitionError ForkChoiceNode :=
+  runQuery store (getHead (map := hashMap) store :
+    EStateM StoreTransitionError (Store hashMap) ForkChoiceNode)
+
 /-- Fold the decoded fork-choice `steps` over the Heze store. Identical shape to Gloas's
 interpreter, re-instantiated over Heze types: a `block` step runs `on_block` then replays
 the block's own attestations / attester-slashings; `execution_payload` /
@@ -270,12 +278,15 @@ private def fcInterpretHeze [Preset] [Config] [HasherTag] [CryptoBackend]
         runOn store (onPayloadAttestationMessage (map := hashMap) msg false : EStateM StoreTransitionError (Store hashMap) Unit)
       store := (← checkStepValidity store valid outcome)
     | .checkHead root slot =>
-      let head := getHead store
+      let head ← queryHead store
       assert (head.root == root)
-      let headSlot := match FcMap.lookup store.blocks head.root with | some b => b.slot.toNat | none => 0
-      assert (headSlot == slot)
+      -- `getOrThrow` is monad-polymorphic, and the fold's own monad is already
+      -- `Except StoreTransitionError`, so the read binds directly (no `runQuery` detour).
+      let headBlock ← FcMap.getOrThrow store.blocks head.root
+      assert (headBlock.slot.toNat == slot)
     | .checkHeadPayloadStatus status =>
-      assert ((getHead store).payloadStatus.toNat == status)
+      let head ← queryHead store
+      assert (head.payloadStatus.toNat == status)
     | .checkPayloadTimelinessVote blockRoot votes =>
       assert (FcMap.lookupD store.payloadTimelinessVote (bytesToRoot blockRoot) == votes)
     | .checkPayloadDataAvailabilityVote blockRoot votes =>
