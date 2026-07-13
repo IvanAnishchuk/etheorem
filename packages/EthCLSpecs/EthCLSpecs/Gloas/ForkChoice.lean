@@ -16,8 +16,9 @@ map backing (`EthCLLib.Spec.FcMap`) and the Gloas boxed `State`, the section ope
 `fork_choice_section map`, and the wire handlers are monadic `StoreTransition` actions over
 the typed `StoreTransitionError`. The ePBS surface adds `on_execution_payload_envelope`,
 `on_payload_attestation_message`, the two per-block PTC vote maps, the parent-payload
-assert, and `notify_ptc_messages` (the block's payload attestations replayed per
-validator, a pure store transform). `on_block` runs the Gloas `state_transition` through
+assert, and `notify_ptc_messages` (the block's payload attestations replayed per validator
+through `on_payload_attestation_message`, so the handler's rejects apply on the
+block path too). `on_block` runs the Gloas `state_transition` through
 `runStateTransition`.
 
 The `Ord (Vector UInt8 32)` instance and the `Checkpoint` `Ord` / `BEq` / `Hashable`
@@ -627,38 +628,68 @@ forkdef updateProposerBoostRoot (store : Store map) (head root : Root) :
 /-! ## PTC vote recording -/
 
 /-- Write `payload_present` / `blob_data_available` at the given PTC positions for the
-attested block (the shared core of `on_payload_attestation_message`'s vote write). -/
+attested block (the shared core of `on_payload_attestation_message`'s vote write). The
+two vote-map reads are plain `Dict` reads in the pinned spec
+(`store.payload_timeliness_vote[data.beacon_block_root]`, fork-choice.md:1110-1111),
+so a miss rejects with `missingKey` rather than defaulting. -/
 forkdef recordPtcVotes (store : Store map) (data : PayloadAttestationData) (ptcIndices : Array Nat) :
-    Store map :=
-  let timelinessVote := FcMap.lookupD store.payloadTimelinessVote data.beaconBlockRoot
-  let availabilityVote := FcMap.lookupD store.payloadDataAvailabilityVote data.beaconBlockRoot
+    StoreTransition (Store map) := do
+  let timelinessVote ← FcMap.getOrThrow store.payloadTimelinessVote data.beaconBlockRoot
+  let availabilityVote ← FcMap.getOrThrow store.payloadDataAvailabilityVote data.beaconBlockRoot
   let (timelinessVote, availabilityVote) := ptcIndices.foldl (init := (timelinessVote, availabilityVote))
     fun (tv, av) i => (tv.set! i (some data.payloadPresent), av.set! i (some data.blobDataAvailable))
-  { store with
+  pure { store with
     payloadTimelinessVote := FcMap.insert store.payloadTimelinessVote data.beaconBlockRoot timelinessVote
     payloadDataAvailabilityVote := FcMap.insert store.payloadDataAvailabilityVote data.beaconBlockRoot availabilityVote }
 
+/-! ## on_payload_attestation_message -/
+
+/-- `on_payload_attestation_message(store, ptc_message, is_from_block)` (the wire
+handler, `is_from_block = false`): the attested block's state slot must match, the
+validator must sit in its PTC, the message must be for the current slot, and its
+signature must verify; then the votes are recorded. -/
+forkdef onPayloadAttestationMessage (msg : PayloadAttestationMessage) (isFromBlock : Bool) :
+    StoreTransition Unit := do
+  let store ← get
+  let data := msg.data
+  let state ← FcMap.getOrAssert store.blockStates data.beaconBlockRoot
+    "data.beacon_block_root in store.block_states"
+
+  if !(data.slot == sszGet state slot) then pure ()
+  else
+    let ptc := getPtc state data.slot
+    let ptcIndices := (Array.range Const.ptcSize).filter fun i => vget ptc i == msg.validatorIndex
+    assert (ptcIndices.size > 0)
+    if isFromBlock then set (← recordPtcVotes store data ptcIndices)
+    else
+      assert (data.slot == getCurrentSlot store)
+      let indexed : IndexedPayloadAttestation :=
+        { attestingIndices := sszOfArray #[msg.validatorIndex], data := data, signature := msg.signature }
+      assert (isValidIndexedPayloadAttestation state indexed)
+      set (← recordPtcVotes store data ptcIndices)
+
 /-- `notify_ptc_messages(store, state, payload_attestations)`: replay the block's
 payload attestations as per-validator `on_payload_attestation_message`s
-(`is_from_block = true`). The block-replay never asserts, so the per-message effect is
-inlined as a pure store transform: apply the vote when the attested block's state slot
-matches and the validator sits in its PTC, otherwise skip. -/
-forkdef notifyPtcMessages (store : Store map) (state : State) (payloadAttestations : Array PayloadAttestation) :
-    Store map := Id.run do
-  if sszGet state slot == 0 then return store
-
-  let mut store := store
+(`is_from_block = true`), exactly the pinned loop (fork-choice.md:217-237): each
+attesting index becomes a `PayloadAttestationMessage` with an empty signature (never
+verified on the block path) and runs through the wire handler. The handler's ungated
+rejects apply on this path too, as in pyspec. An unknown `beacon_block_root` rejects with
+the spec's `assert data.beacon_block_root in store.block_states` (a `getOrAssert` `.assert`),
+and an attester outside the attested block's PTC rejects with
+the `ptc_indices` assert. Either reject aborts the whole surrounding `on_block`.
+`state` is the block's post-state, used only to resolve the attesting indices
+(`get_indexed_payload_attestation`); the handler re-reads the attested block's own
+state from the store, as the spec does. -/
+forkdef notifyPtcMessages (state : State) (payloadAttestations : Array PayloadAttestation) :
+    StoreTransition Unit := do
+  if sszGet state slot == 0 then return
   for pa in payloadAttestations do
     let indexed := getIndexedPayloadAttestation state pa
     for idx in indexed.attestingIndices do
-      match FcMap.lookup store.blockStates pa.data.beaconBlockRoot with
-      | none => pure ()
-      | some attState =>
-        if pa.data.slot == sszGet attState slot then
-          let ptc := getPtc attState pa.data.slot
-          let ptcIndices := (Array.range Const.ptcSize).filter fun i => vget ptc i == idx
-          if ptcIndices.size > 0 then store := recordPtcVotes store pa.data ptcIndices
-  return store
+      -- `(map := map)`: the handler takes no store argument, so the section's map backing
+      -- is undetermined at this call site (the ambient `get`/`set` constraint alone leaves
+      -- it a stuck metavariable); name it explicitly.
+      onPayloadAttestationMessage (map := map) { validatorIndex := idx, data := pa.data, signature := default } true
 
 /-! ## on_block -/
 
@@ -689,15 +720,21 @@ forkdef onBlock (signedBlock : SignedBeaconBlock) : StoreTransition Unit := do
   let head ← getHead store
 
   -- Insert the block, its post-state, and the two empty per-block PTC vote maps.
+  -- `set` before the replay: the routed `notify_ptc_messages` reads the ambient store,
+  -- and pyspec's mutation order has these four writes precede it, so a replay reject
+  -- leaves them in place.
   let emptyVotes : Array (Option Bool) := Array.replicate Const.ptcSize none
-  let store := { store with
+  set { store with
     blocks := FcMap.insert store.blocks blockRoot block
     blockStates := FcMap.insert store.blockStates blockRoot postState
     payloadTimelinessVote := FcMap.insert store.payloadTimelinessVote blockRoot emptyVotes
     payloadDataAvailabilityVote := FcMap.insert store.payloadDataAvailabilityVote blockRoot emptyVotes }
 
-  -- Replay the block's PTC votes, record timeliness, boost, and pull up the tip.
-  let store := notifyPtcMessages store postState block.body.payloadAttestations.toArray
+  -- Replay the block's PTC votes through the wire handler (`is_from_block = true`),
+  -- then record timeliness, boost, and pull up the tip. `(map := map)` as in the replay
+  -- itself: no store argument determines the backing.
+  notifyPtcMessages (map := map) postState block.body.payloadAttestations.toArray
+  let store ← get
   let store ← recordBlockTimeliness store blockRoot
   let store ← updateProposerBoostRoot store head.root blockRoot
   let store := updateCheckpoints store (sszGet postState currentJustifiedCheckpoint) (sszGet postState finalizedCheckpoint)
@@ -779,31 +816,6 @@ forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) 
   | .ok warm => set { store with
       blockStates := FcMap.insert store.blockStates envelope.beaconBlockRoot warm,
       payloads := FcMap.insert store.payloads envelope.beaconBlockRoot envelope }
-
-/-! ## on_payload_attestation_message -/
-
-/-- `on_payload_attestation_message(store, ptc_message, is_from_block)` (the wire
-handler, `is_from_block = false`): the attested block's state slot must match, the
-validator must sit in its PTC, the message must be for the current slot, and its
-signature must verify; then the votes are recorded. -/
-forkdef onPayloadAttestationMessage (msg : PayloadAttestationMessage) (isFromBlock : Bool) :
-    StoreTransition Unit := do
-  let store ← get
-  let data := msg.data
-  let state ← FcMap.getOrThrow store.blockStates data.beaconBlockRoot
-
-  if !(data.slot == sszGet state slot) then pure ()
-  else
-    let ptc := getPtc state data.slot
-    let ptcIndices := (Array.range Const.ptcSize).filter fun i => vget ptc i == msg.validatorIndex
-    assert (ptcIndices.size > 0)
-    if isFromBlock then set (recordPtcVotes store data ptcIndices)
-    else
-      assert (data.slot == getCurrentSlot store)
-      let indexed : IndexedPayloadAttestation :=
-        { attestingIndices := sszOfArray #[msg.validatorIndex], data := data, signature := msg.signature }
-      assert (isValidIndexedPayloadAttestation state indexed)
-      set (recordPtcVotes store data ptcIndices)
 
 /-! ## on_attestation -/
 
@@ -928,5 +940,78 @@ forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) :
       payloadDataAvailabilityVote := FcMap.empty }
 
 end
+
+/-! ### Build-enforced pins (vectorless): the PTC replay rejects
+
+The replay conversions' reject branches are unreachable by conformance vectors (the
+generators cannot ship the pyspec `KeyError` case), so they are locked here, the
+same pattern as Heze's inclusion-list pins. `pinStore` mirrors Heze's
+`pinPilsStore` without the two FOCIL fields. -/
+
+/-- The pins' concrete fork-choice monad: the minimal preset over the deterministic
+`treeMap` and the FFI hasher. -/
+private abbrev PinM := EStateM StoreTransitionError (@Store minimal treeMap fastHasherTag)
+
+private def pinRoot : Root := Vector.replicate 32 9
+
+/-- A minimal empty Gloas `Store`: every field empty/zero, mirroring the
+`getForkchoiceStore` literal. The `letI`s fix the preset / hasher so the anonymous
+`Store` constructor synthesizes them. -/
+private def pinStore : @Store minimal treeMap fastHasherTag :=
+  letI : Preset := minimal
+  letI : HasherTag := fastHasherTag
+  { time := 0, genesisTime := 0
+    justifiedCheckpoint := default, finalizedCheckpoint := default
+    unrealizedJustifiedCheckpoint := default, unrealizedFinalizedCheckpoint := default
+    proposerBoostRoot := fcZeroRoot
+    equivocatingIndices := #[]
+    blocks := FcMap.empty
+    blockStates := FcMap.empty
+    blockTimeliness := FcMap.empty
+    checkpointStates := FcMap.empty
+    latestMessages := FcMap.empty
+    unrealizedJustifications := FcMap.empty
+    payloads := FcMap.empty
+    payloadTimelinessVote := FcMap.empty
+    payloadDataAvailabilityVote := FcMap.empty }
+
+/-- `recordPtcVotes` rejects (`missingKey`) when the per-block vote maps carry no
+entry for the attested root, the pinned plain-`Dict` read; the pre-conversion
+`lookupD` silently defaulted to `#[]` and the writes no-opped. `FcMap` only
+(hash-free), so kernel `#guard`. -/
+private def pinRecordPtcVotesThrows : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  let data : PayloadAttestationData := { (default : PayloadAttestationData) with beaconBlockRoot := pinRoot }
+  match (recordPtcVotes (map := treeMap) pinStore data #[0] : PinM (Store treeMap)).run pinStore with
+  | .error (.missingKey _) _ => true
+  | _ => false
+#guard pinRecordPtcVotesThrows = true
+
+/-- The routed replay throw, end-to-end: `notifyPtcMessages` over a state at
+`slot := 1` (zeroed `ptc_window`, so the PTC is all validator 0; alpha.11 `get_ptc`
+is a plain window read) and a one-bit payload attestation whose `beacon_block_root`
+the store does not know rejects with the wire handler's `.assert` (the pinned
+`assert data.beacon_block_root in store.block_states` membership assert, a
+`getOrAssert` miss), where the pre-conversion replay silently skipped the
+message. This locks the routing itself: the replay path IS
+`on_payload_attestation_message (is_from_block = true)`. `State` is FFI-backed
+(`FastBox`), so `native_decide`. -/
+private def pinReplayThrows : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  -- The handler wants a `CryptoBackend` for its wire-path signature check; the
+  -- block-replay path (`is_from_block = true`) never reaches it, but elaboration does.
+  letI : CryptoBackend := CryptoBackend.realBackend
+  let state : State := SSZ.FastBox ({ (default : @EthCLSpecs.Gloas.BeaconState minimal) with slot := 1 })
+  let pa : PayloadAttestation := { (default : PayloadAttestation) with
+    aggregationBits := bitSet default 0 true
+    data := { (default : PayloadAttestationData) with beaconBlockRoot := pinRoot, slot := 1 } }
+  match (notifyPtcMessages (map := treeMap) state #[pa] : PinM Unit).run pinStore with
+  | .error (.assert _) _ => true
+  | _ => false
+example : pinReplayThrows = true := by native_decide
 
 end EthCLSpecs.Gloas

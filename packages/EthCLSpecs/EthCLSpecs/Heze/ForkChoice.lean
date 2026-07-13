@@ -354,6 +354,7 @@ inherit onTick
 inherit recordBlockTimeliness
 inherit updateProposerBoostRoot
 inherit recordPtcVotes
+inherit onPayloadAttestationMessage
 inherit notifyPtcMessages
 inherit onBlock
 inherit computeTimeAtSlot
@@ -420,7 +421,6 @@ forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) 
       blockStates := FcMap.insert store.blockStates envelope.beaconBlockRoot warm,
       payloads := FcMap.insert store.payloads envelope.beaconBlockRoot envelope }
 
-inherit onPayloadAttestationMessage
 inherit storeTargetCheckpointState
 inherit validateOnAttestation
 inherit updateLatestMessages
