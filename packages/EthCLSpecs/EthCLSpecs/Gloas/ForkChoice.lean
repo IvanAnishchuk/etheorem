@@ -544,23 +544,18 @@ forkdef updateUnrealizedCheckpoints (store : Store map) (uj uf : Checkpoint) : S
 
 /-- `compute_pulled_up_tip`: pull up the block's post-state through
 `process_justification_and_finalization`, record its unrealized justification, and
-(for a prior-epoch block) realize it. Best-effort, so `EStateM.run`, not
-`runStateTransition`. -/
+(for a prior-epoch block) realize it. The `block_states` / `blocks` reads raise on a
+miss, and the pull-up itself propagates: pyspec runs `process_justification_and_finalization`
+unguarded, so a reject aborts the surrounding `on_block`. -/
 forkdef computePulledUpTip (store : Store map) (blockRoot : Root) : StoreTransition (Store map) := do
-  -- The spec reads `store.block_states[block_root]` and `store.blocks[block_root]`, both
-  -- plain `Dict`s that raise on a miss. (The inner `processJustificationAndFinalization`
-  -- stays best-effort — a separate discrepancy from the missing-key throws this sweep fixes.)
   let state ← FcMap.getOrThrow store.blockStates blockRoot
   let block ← FcMap.getOrThrow store.blocks blockRoot
-  let act : EStateM StateTransitionError State Unit := processJustificationAndFinalization
-  match act.run state with
-  | .ok _ pulled =>
-    let cj := sszGet pulled currentJustifiedCheckpoint
-    let fz := sszGet pulled finalizedCheckpoint
-    let store := { store with unrealizedJustifications := FcMap.insert store.unrealizedJustifications blockRoot cj }
-    let store := updateUnrealizedCheckpoints store cj fz
-    pure (if computeEpochAtSlot block.slot < getCurrentStoreEpoch store then updateCheckpoints store cj fz else store)
-  | .error _ _ => pure store
+  let pulled ← runStateTransition state processJustificationAndFinalization
+  let cj := sszGet pulled currentJustifiedCheckpoint
+  let fz := sszGet pulled finalizedCheckpoint
+  let store := { store with unrealizedJustifications := FcMap.insert store.unrealizedJustifications blockRoot cj }
+  let store := updateUnrealizedCheckpoints store cj fz
+  pure (if computeEpochAtSlot block.slot < getCurrentStoreEpoch store then updateCheckpoints store cj fz else store)
 
 /-! ## on_tick -/
 
