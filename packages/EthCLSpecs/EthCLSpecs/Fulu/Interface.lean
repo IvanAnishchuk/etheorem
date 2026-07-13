@@ -196,6 +196,13 @@ private def runBlocksImpl (P : Preset) (C : Config) (preBytes : ByteArray)
     for sb in signedBlocks do stateTransition sb
   RunError.ofSpec (runToRoot box0 action)
 
+/-- Run `getHead` over the snapshot store as a pure query (`runQuery` discards the final
+store). Shared by the `checkHead` / `checkProposerHead` arms. -/
+private def queryHead [Preset] [Config] [HasherTag] (store : Store hashMap) :
+    Except StoreTransitionError Root :=
+  runQuery store (getHead (map := hashMap) store :
+    EStateM StoreTransitionError (Store hashMap) Root)
+
 /-- Fold the decoded `steps` over the store from `store0`, verifying each `checks`
 step. A `block` step also feeds the block's own attestations / attester-slashings
 into the store (`is_from_block = true`). -/
@@ -244,10 +251,10 @@ private def fcInterpret [Preset] [Config] [HasherTag] [CryptoBackend]
         runOn store (onAttesterSlashing (map := hashMap) a : EStateM StoreTransitionError (Store hashMap) Unit)
       store := (← checkStepValidity valid outcome)
     | .checkHead root slot =>
-      let head := getHead store
+      let head ← queryHead store
       assert (head == root)
-      let headSlot := match FcMap.lookup store.blocks head with | some b => b.slot.toNat | none => 0
-      assert (headSlot == slot)
+      let headBlock ← FcMap.getOrThrow store.blocks head
+      assert (headBlock.slot.toNat == slot)
     | .checkJustified epoch root =>
       assert (store.justifiedCheckpoint.epoch.toNat == epoch)
       assert (store.justifiedCheckpoint.root == root)
@@ -259,7 +266,9 @@ private def fcInterpret [Preset] [Config] [HasherTag] [CryptoBackend]
     | .checkTime t => assert (store.time.toNat == t)
     | .checkGenesisTime t => assert (store.genesisTime.toNat == t)
     | .checkProposerHead root =>
-      let proposerHead := getProposerHead store (getHead store) (getCurrentSlot store)
+      let head ← queryHead store
+      let proposerHead ← runQuery store (getProposerHead (map := hashMap) store head (getCurrentSlot store) :
+        EStateM StoreTransitionError (Store hashMap) Root)
       assert (proposerHead == root)
     | .unsupported reason => throw (StoreTransitionError.todo reason)
     -- ePBS-only steps (Gloas, EIP-7732): impossible in a well-formed fulu vector, so
