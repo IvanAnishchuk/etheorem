@@ -51,9 +51,13 @@ state-transition pipeline, plus operations, fork choice, and the Fulu→Gloas
 transition); every in-scope minimal and mainnet vector passes by root or rejects
 faithfully, with no `xfail`. Gloas inherits the Fulu `registry_updates` substep (the
 DSL re-elaborates the captured `forkdef` in the Gloas namespace), so the overflow fix
-above propagated to Gloas with no Gloas-side change. Two spec asserts dropped as
-total-function shapes are catalogued in `IMPLEMENTATION_NOTES.md`, "Fork choice" and
-"Heze diff" (the anchor-root one is shared with Fulu; Heze inherits both).
+above propagated to Gloas with no Gloas-side change. The fork-choice asserts and plain-`Dict`
+reads throw faithfully, including `get_forkchoice_store`'s anchor-root assert (shared with Fulu
+and Heze) and the PTC block-replay vote writes (`notify_ptc_messages` routes through the
+throwing `on_payload_attestation_message`). The one holdout is `compute_pulled_up_tip`: it
+still swallows a justification-update reject, unreachable only because
+`get_block_root_at_slot` drops the pyspec recency assert. All catalogued in
+`IMPLEMENTATION_NOTES.md`, "Fork choice" and "Heze diff".
 
 ## Heze
 

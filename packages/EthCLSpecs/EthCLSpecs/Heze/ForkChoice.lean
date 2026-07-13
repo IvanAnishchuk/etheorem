@@ -414,9 +414,10 @@ forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) 
     let store ← recordPayloadInclusionListSatisfaction store state envelope.beaconBlockRoot envelope.payload
     -- INVARIANT: `payloads[root]` and `payloadInclusionListSatisfaction[root]` are written
     -- together here (the satisfaction key via `recordPayloadInclusionListSatisfaction` just
-    -- above). Keep it that way: `isPayloadInclusionListSatisfied`'s default-false-on-miss is
-    -- sound only because a verified `root` (present in `payloads`) always carries a
-    -- satisfaction entry.
+    -- above). Keep it that way: `isPayloadInclusionListSatisfied` opens with the spec's
+    -- `assert root in store.payload_inclusion_list_satisfaction` (a throwing `getOrAssert`),
+    -- and this pairing is what keeps that reject unreachable for any verified `root`
+    -- (present in `payloads`).
     set { store with
       blockStates := FcMap.insert store.blockStates envelope.beaconBlockRoot warm,
       payloads := FcMap.insert store.payloads envelope.beaconBlockRoot envelope }

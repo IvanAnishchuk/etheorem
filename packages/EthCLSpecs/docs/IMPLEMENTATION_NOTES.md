@@ -485,10 +485,10 @@ differs here, so Gloas overrides most handlers rather than inheriting them, and 
 The weight/head walk throws its plain-`Dict` reads and `should_extend_payload`'s slot
 assert faithfully, threading `StoreTransitionError` end to end (`get_weight`, `get_head`,
 `filter_block_tree`, the leaf reads, and `should_extend_payload`'s
-`store.blocks[root]` / `store.blocks[proposer_root]`). `get_forkchoice_store`'s anchor-root
-assert (`assert anchor_block.state_root == hash_tree_root(anchor_state)`) is still dropped, its
-constructor pure across all three forks. That is a known faithfulness gap pending conversion to a
-throw in this branch. Heze inherits these shapes; the Heze diff below carries the detailed entries.
+`store.blocks[root]` / `store.blocks[proposer_root]`). `get_forkchoice_store` throws its
+anchor-root assert (`assert anchor_block.state_root == hash_tree_root(anchor_state)`), its
+constructor threaded through `Except StoreTransitionError` across all three forks. Heze inherits
+these shapes; the Heze diff below carries the detailed entries.
 
 ## Fulu state transition
 
@@ -631,17 +631,20 @@ on unreachability arguments at their call sites.
 
 The entries below record each FOCIL read and assert and how it meets the spec. Most are
 faithful throws: the spec rejects (an `assert`, a plain-`Dict` `KeyError`, an `IndexError`, a
-`uint64` underflow) and the Lean throws to match, unreachable on any alpha.11 vector. Two are
-residual: the `[ExecutionEngine]` seam's optimistic default, and one dropped anchor-root assert
-held for the cross-fork audit. Spec citations resolve under `specs/` in `ethereum/consensus-specs`
+`uint64` underflow) and the Lean throws to match, unreachable on any alpha.11 vector. One case
+is a deliberate trust boundary rather than a throw: the `[ExecutionEngine]` seam's optimistic
+default, the same injection-seam shape as `[CryptoBackend]`. The external execution layer owns
+that verdict and the spec does not raise there; the reference harness stubs it `true` too. Spec
+citations resolve under `specs/` in `ethereum/consensus-specs`
 at the pinned version, which is also a git tag there.
 
 - **`is_inclusion_list_satisfied`** (`heze/fork-choice.md:54-62`) defers its verdict to
   `ExecutionEngine.is_inclusion_list_satisfied`, an Engine-API call against an external
   execution client. This harness has no execution layer, so the call goes through the
   `[ExecutionEngine]` typeclass (the Engine seam above), whose default instance answers
-  the constant `true`. That default is the residual execution-layer trust boundary of
-  the FOCIL gate. No conformance vector reaches the discriminating `false` branch; the
+  the constant `true`. That default is the execution-layer trust boundary of the FOCIL
+  gate, an injection seam, not a dropped throw. No conformance vector reaches the
+  discriminating `false` branch; the
   `pinRecordRefuted` `native_decide` example drives it end-to-end under a locally
   substituted refuting engine instance.
 - **Two map reads throw on a missing key, matching the spec.**
@@ -675,13 +678,14 @@ at the pinned version, which is also a git tag there.
   (`EthCLSpecs/Heze/Signing.lean`), rather than masking the raise as a `false`. The predicate has
   no in-model caller by design.
 - **`get_forkchoice_store`** (`heze/fork-choice.md:140-166`) opens with
-  `assert anchor_block.state_root == hash_tree_root(anchor_state)`; the Lean restatement is a pure
-  constructor and drops it, so an inconsistent anchor pair seeds a store instead of raising. Every
-  fork_choice vector runs through this constructor, and the harness always derives the anchor block
-  and state from the same vector's files, so no vector exercises the mismatch. The Gloas and Fulu
-  constructors drop the identical assert. This is a known faithfulness gap pending conversion in
-  this branch; a faithful throw needs the constructor threaded through the reject monad across all
-  three forks.
+  `assert anchor_block.state_root == hash_tree_root(anchor_state)`; the Lean seeds the store
+  through `Except StoreTransitionError` and throws that assert to match, rather than seeding a
+  store from an inconsistent anchor pair. The Gloas and Fulu constructors throw the
+  textually-identical assert (`gloas/fork-choice.md:184`, `phase0/fork-choice.md:216`). Every
+  fork_choice vector runs through this constructor with the anchor block and state derived from
+  the same vector's files, so `state_root` always matches and no vector exercises the reject
+  branch; `pinAnchorRejects` (`EthCLSpecs/Heze/ForkChoice.lean`) locks the throw on a mismatched
+  default pair.
 
 `get_inclusion_list_committee` (`heze/beacon-chain.md:95-110`) resamples the committee as
 `indices[i % len(indices)]`, which raises `ZeroDivisionError` on an empty concatenation. The

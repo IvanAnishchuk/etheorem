@@ -49,8 +49,7 @@ Bumping the pin touches more than the constant. In one pass:
 4. Re-check each recorded divergence itself (`IMPLEMENTATION_NOTES.md`, the
    per-fork divergence entries): the new spec text may have moved, or may have
    fixed the branch a divergence pins.
-5. Sweep every doc for citations of the old tag (`grep -rn '<old-tag>'`); the
-   alpha.10→alpha.11 bump left six behind.
+5. Sweep every doc for citations of the old tag (`grep -rn '<old-tag>'`).
 6. Diff the corpus for new runners or handlers (new directories under
    `tests/<preset>/<fork>/`); either collect them or name the exclusion in the
    `IN_SCOPE_RUNNERS` allowlist comment, never leave one silently uncollected.
