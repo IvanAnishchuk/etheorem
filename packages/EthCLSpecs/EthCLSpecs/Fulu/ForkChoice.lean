@@ -82,15 +82,30 @@ forkdef fcZeroRoot : Root := Vector.replicate 32 0
 
 /-! ## Time / slot accessors -/
 
+/-- `seconds_to_milliseconds` (phase0 fork-choice.md): convert seconds to
+milliseconds, clamping to `UINT64_MAX` on overflow. The clamp is unreachable at
+realistic slot counts (`seconds` stays far below `UINT64_MAX // 1000`); modeled to
+mirror the pinned helper exactly. The spec calls it only from `time_into_slot`, so it
+backs `timeIntoSlotMs` alone; the other clock sites use the raw `* 1000` form the spec
+uses there. Shared with Gloas (`Fulu.secondsToMilliseconds`). -/
+def secondsToMilliseconds (seconds : UInt64) : UInt64 :=
+  if seconds > (0xffffffffffffffff : UInt64) / 1000 then (0xffffffffffffffff : UInt64)
+  else seconds * 1000
+
+/-- `get_slots_since_genesis`, ms-based: `(time - genesis) * 1000 // SLOT_DURATION_MS`
+(phase0 fork-choice.md:242). Raw `* 1000`, not `seconds_to_milliseconds` (the spec
+clamps only `time_into_slot`). Value-equivalent to the prior `/ secondsPerSlot` form
+since `slotDurationMs == secondsPerSlot * 1000`. -/
 forkdef getSlotsSinceGenesis (store : Store map) : UInt64 :=
-  (store.time - store.genesisTime) / Const.secondsPerSlot
+  ((store.time - store.genesisTime) * 1000) / Const.slotDurationMs
 forkdef getCurrentSlot (store : Store map) : Slot := Const.genesisSlot + getSlotsSinceGenesis store
 forkdef getCurrentStoreEpoch (store : Store map) : Epoch := computeEpochAtSlot (getCurrentSlot store)
 
-/-- `time_into_slot`, in milliseconds: wall-clock elapsed since the slot start, modulo the
-slot length. The store clock is in seconds, converted with `* 1000`. -/
+/-- `time_into_slot`, in milliseconds: wall-clock elapsed since the slot start, modulo
+the slot length, via the overflow-guarded `seconds_to_milliseconds` (the one spec site
+that clamps). -/
 forkdef timeIntoSlotMs (store : Store map) : UInt64 :=
-  ((store.time - store.genesisTime) * 1000) % Const.slotDurationMs
+  secondsToMilliseconds (store.time - store.genesisTime) % Const.slotDurationMs
 
 /-- A basis-points deadline within a slot, in milliseconds: `bps * SLOT_DURATION_MS //
 BASIS_POINTS`. Multiply before the `UInt64` truncating divide, so the floor lands on the full
@@ -357,10 +372,10 @@ where
 /-- `advance_store_time`: catch up slot-by-slot, then set the exact time (the pure
 core of `on_tick`). Fuel-bounded by the number of slots to advance. -/
 forkdef advanceStoreTime (store : Store map) (time : UInt64) : Store map :=
-  fuelIterate ((((time - store.genesisTime) / Const.secondsPerSlot) - getCurrentSlot store).toNat + 1) store fun store =>
-    let tickSlot := (time - store.genesisTime) / Const.secondsPerSlot
+  fuelIterate ((((time - store.genesisTime) * 1000 / Const.slotDurationMs) - getCurrentSlot store).toNat + 1) store fun store =>
+    let tickSlot := (time - store.genesisTime) * 1000 / Const.slotDurationMs
     if getCurrentSlot store < tickSlot then
-      let previousTime := store.genesisTime + (getCurrentSlot store + 1) * Const.secondsPerSlot
+      let previousTime := store.genesisTime + (getCurrentSlot store + 1) * Const.slotDurationMs / 1000
       .next (onTickPerSlot store previousTime)
     else .done (onTickPerSlot store time)
 
@@ -550,7 +565,7 @@ forkdef getForkchoiceStore (anchorState : State) (anchorBlock : BeaconBlock) :
   let epoch := currentEpochOf anchorState
   let cp : Checkpoint := { epoch := epoch, root := anchorRoot }
   pure
-    { time := (sszGet anchorState genesisTime) + Const.secondsPerSlot * (sszGet anchorState slot)
+    { time := (sszGet anchorState genesisTime) + Const.slotDurationMs * (sszGet anchorState slot) / 1000
       genesisTime := sszGet anchorState genesisTime
       justifiedCheckpoint := cp, finalizedCheckpoint := cp
       unrealizedJustifiedCheckpoint := cp, unrealizedFinalizedCheckpoint := cp

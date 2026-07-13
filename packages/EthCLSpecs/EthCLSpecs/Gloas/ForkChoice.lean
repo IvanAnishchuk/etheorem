@@ -124,9 +124,10 @@ forkdef getCurrentSlot (store : Store map) : Slot := Const.genesisSlot + getSlot
 forkdef getCurrentStoreEpoch (store : Store map) : Epoch := computeEpochAtSlot (getCurrentSlot store)
 
 /-- `time_into_slot`, in milliseconds: wall-clock elapsed since the slot start, modulo the slot
-length. -/
+length, via the overflow-guarded `seconds_to_milliseconds` (shared with Fulu). The prior form
+was a raw `* 1000`, missing the pinned clamp; value-identical at realistic slots. Heze inherits. -/
 forkdef timeIntoSlotMs (store : Store map) : UInt64 :=
-  ((store.time - store.genesisTime) * 1000) % Const.slotDurationMs
+  Fulu.secondsToMilliseconds (store.time - store.genesisTime) % Const.slotDurationMs
 
 /-- A basis-points deadline within a slot, in milliseconds: `bps * SLOT_DURATION_MS //
 BASIS_POINTS`. Multiply before the `UInt64` truncating divide, so the floor lands on the full
