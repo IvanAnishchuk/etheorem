@@ -820,7 +820,11 @@ forkdef onExecutionPayloadEnvelope (signedEnv : SignedExecutionPayloadEnvelope) 
 /-! ## on_attestation -/
 
 /-- `store_target_checkpoint_state`: cache the target's state, advancing to the
-target epoch start if needed (best-effort, so `EStateM.run`). -/
+target epoch start if needed. The pinned `process_slots` call is unguarded, so a
+rejected advance propagates (wrapped `.transition`) and nothing is cached, aborting
+the surrounding `on_attestation` with the store unchanged. Reachable only from
+degenerate near-zero-stake states; the pre-conversion `runBestEffort` cached the
+UNADVANCED base state instead, a wrong-slot entry later reads would consume. -/
 forkdef storeTargetCheckpointState (store : Store map) (target : Checkpoint) :
     StoreTransition (Store map) := do
   if FcMap.contains store.checkpointStates target then pure store
@@ -829,10 +833,10 @@ forkdef storeTargetCheckpointState (store : Store map) (target : Checkpoint) :
     -- following `store.block_states[target.root]` is a plain `Dict` read that raises.
     let base ← FcMap.getOrThrow store.blockStates target.root
     let targetSlot := computeStartSlotAtEpoch target.epoch
-    let advanced :=
+    let advanced ←
       if (sszGet base slot) < targetSlot then
-        runBestEffort (processSlots targetSlot) base
-      else base
+        runStateTransition base (processSlots targetSlot)
+      else pure base
     pure { store with checkpointStates := FcMap.insert store.checkpointStates target advanced }
 
 /-- `validate_on_attestation` (Gloas): adds `index ∈ {0, 1}`, same-slot ⇒ index 0,
@@ -1013,5 +1017,35 @@ private def pinReplayThrows : Bool :=
   | .error (.assert _) _ => true
   | _ => false
 example : pinReplayThrows = true := by native_decide
+
+/-- The target-checkpoint advance propagates a `process_slots` reject. The fixture
+state is `default` (zero validators, slot 0) carrying one queued
+`PendingConsolidation`: advancing to epoch 1's start slot reaches
+`process_pending_consolidations`, whose `state.validators[source_index]` read is a
+pinned plain-list read (pyspec `IndexError`), so the epoch step rejects with
+`outOfBounds` and the unguarded pinned `process_slots` means
+`store_target_checkpoint_state` re-throws it (`.transition`) with nothing cached,
+where the pre-conversion `runBestEffort` cached the unadvanced state. This pins the
+propagation semantics; the throw site inside epoch processing is incidental. The
+consolidation carrier is deliberate: a bare zero-validator advance does NOT reject,
+it grinds through `cbwsAux`'s 10M-iteration fuel in the proposer lookahead, so the
+reject must land earlier in the epoch pipeline. `State` is FFI-backed (`FastBox`),
+so `native_decide`. -/
+private def pinTargetAdvanceRejects : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  -- `process_slots` runs the state machine, whose section wants a `CryptoBackend`.
+  letI : CryptoBackend := CryptoBackend.realBackend
+  let bs : @EthCLSpecs.Gloas.BeaconState minimal :=
+    { (default : @EthCLSpecs.Gloas.BeaconState minimal) with
+      pendingConsolidations := sszOfArray #[{ sourceIndex := 0, targetIndex := 0 }] }
+  let state : State := SSZ.FastBox bs
+  let store := { pinStore with blockStates := FcMap.insert FcMap.empty pinRoot state }
+  let target : Checkpoint := { epoch := 1, root := pinRoot }
+  match (storeTargetCheckpointState (map := treeMap) store target : PinM (Store treeMap)).run store with
+  | .error (.transition _) _ => true
+  | _ => false
+example : pinTargetAdvanceRejects = true := by native_decide
 
 end EthCLSpecs.Gloas
