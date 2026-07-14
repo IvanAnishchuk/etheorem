@@ -797,7 +797,7 @@ The crypto primitives are instance-implicit (`[CryptoBackend]`), even though one
 real algorithm is used, because the seam buys two things.
 
 **Caching.** The pyspec suite calls BLS `verify` repeatedly on recurring
-inputs: shared validator sets, domains, and fixtures recur across the sweep, and the
+inputs: shared validator sets, domains, and fixtures recur across the suite, and the
 runner holds one long-lived server per worker so the memo stays warm. The runner
 injects a backend that memoizes `verify` over the real FFI, keyed on the full
 `(pubkey, message, signature)` wire bytes, a small fixed-size key whose hash costs far

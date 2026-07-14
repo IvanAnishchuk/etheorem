@@ -576,7 +576,7 @@ of `on_tick`, ms-based). Fuel-bounded by the number of slots to advance. -/
 forkdef advanceStoreTime (store : Store map) (time : UInt64) : Store map :=
   -- The slot `time` lands in. It is loop-invariant (only `time` and the fixed
   -- `genesisTime` feed it, and `onTickPerSlot` touches neither), so it doubles as
-  -- the fuel bound and is read unchanged inside the sweep.
+  -- the fuel bound and is read unchanged inside the loop.
   let targetSlot := ((time - store.genesisTime) * 1000) / Const.slotDurationMs
   let fuel := (targetSlot - getCurrentSlot store).toNat + 1
   fuelIterate fuel store fun store =>
@@ -1070,5 +1070,25 @@ private def pinBlockRootRecencyRejects : Bool :=
   | .error (.assert _) _ => true
   | _ => false
 example : pinBlockRootRecencyRejects = true := by native_decide
+
+/-- `verifyExecutionPayloadEnvelopeSignature` rejects (`.transition (.outOfBounds …)`) an
+out-of-range `builder_index`: a `default` state has an empty `builders` registry, so an
+envelope with `builder_index = 1` (not the self-build sentinel `UINT64_MAX`) reads
+`state.builders[1]`, which the spec's `IndexError` surfaces through `sszGetIdx` where the
+former `[i]!` would have panicked. The read throws before `bls.Verify`, so no backend runs.
+`State` is FFI-backed, so `native_decide`. -/
+private def pinEnvelopeSigBuilderOob : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  letI : CryptoBackend := CryptoBackend.realBackend
+  let state : State := SSZ.FastBox (default : @EthCLSpecs.Gloas.BeaconState minimal)
+  let signedEnv : SignedExecutionPayloadEnvelope :=
+    { (default : SignedExecutionPayloadEnvelope) with
+      message := { (default : ExecutionPayloadEnvelope) with builderIndex := 1 } }
+  match verifyExecutionPayloadEnvelopeSignature state signedEnv with
+  | .error (.transition (.outOfBounds _ _)) => true
+  | _ => false
+example : pinEnvelopeSigBuilderOob = true := by native_decide
 
 end EthCLSpecs.Gloas

@@ -425,11 +425,11 @@ on* : StoreTransition Unit` over the typed `StoreTransitionError`. They write th
 `assert` / `todo` the state machine uses (resolved to `StoreTransitionError` through
 `SpecReject` from the section's monad), `missingKey` for `FcMap` misses, and the inner
 `state_transition` runs through `runStateTransition` (`Spec/Assert.lean`, wrapping an inner
-failure as `StoreTransitionError.transition`). In Fulu, queries and transforms stay pure
-`forkdef`s of the store, with `lookupD` defaults standing in for the spec's raising reads
-(the throw sweep that converted Gloas/Heze is still owed to Fulu); in Gloas/Heze the queries
-run in the throwing store monad too, so a plain-`Dict` miss rejects (`missingKey`) instead
-of defaulting. `ForkInterface.runForkChoice` returns `Except (RunError
+failure as `StoreTransitionError.transition`). Across Fulu, Gloas, and Heze the fork-choice
+queries and transforms run in the throwing store monad, so a plain-`Dict` miss rejects
+(`missingKey`) rather than standing in a `lookupD` default. The `DefaultDict`-backed reads
+(`equivocators`, `inclusion_lists`, the payload-timeliness votes) keep their defaults,
+matching the spec's `defaultdict`. `ForkInterface.runForkChoice` returns `Except (RunError
 StoreTransitionError) Unit`, and `Server` classifies the typed reject (`.spec (.todo _)
 → todo`, everything else, a `decode` or any other spec reject, `→ bug`), so no `"TODO:"`
 string convention is involved. The `FcStep` wire
@@ -459,20 +459,39 @@ boost only when the block is timely, no boost is already set, and the block shar
 head's dependent root (`get_dependent_root`, gated by `MIN_SEED_LOOKAHEAD`), the v1.7
 rule.
 
-The linear DAG walks route through fuel-bounded combinators (§12). In Gloas/Heze,
+The linear DAG walks route through fuel-bounded combinators (§12). In all three forks,
 `getAncestor` and the `getHead` descent read `store.blocks` as they go, so they thread the
 store monad through the throwing `fuelLoop`, rejecting a missing root with `missingKey` to
-match the spec's plain-`Dict` read; Fulu's walks are still the pure `fuelIterate` over
-`lookupD` defaults, the deferred Fulu half of the sweep. `advanceStoreTime`, which touches
+match the spec's plain-`Dict` read. `advanceStoreTime`, which touches
 no map, stays on the pure `fuelIterate` in every fork. The one tree walk,
 `filterBlockTree`, recurses over every child inside a fold, which a linear combinator
 cannot express, so it keeps a local fuel-bounded `where` helper (monadic, for the same block
 read). The totality the doc wants is met either way.
 
-One framework-wide caveat, shared by all three forks: the inherited time arithmetic
-(`timeIntoSlotMs`, the store-time seed in `get_forkchoice_store`) wraps on `UInt64`
-where the pyspec saturates or raises. The difference is observable only at
-astronomically unreachable uptimes.
+One framework-wide caveat, shared by all three forks: the store-time seed in
+`get_forkchoice_store` still uses raw `UInt64` time arithmetic that wraps where the pyspec
+saturates or raises. `timeIntoSlotMs` itself now routes through the clamping
+`secondsToMilliseconds`, so it saturates to match the spec. The difference is observable
+only at astronomically unreachable uptimes.
+
+The three `block_states` membership asserts (`on_block`'s parent read,
+`on_execution_payload_envelope`, `on_payload_attestation_message`, each an
+`assert ... in store.block_states` in the spec) read through `getOrAssert`, so a miss is the
+spec's `.assert` (`AssertionError`), matching the reference runner. This aligns them with the
+payload-timeliness and inclusion-list-satisfaction membership asserts, which already used
+`getOrAssert`. `checkStepValidity` now admits `.assert` and `.transition (.outOfBounds …)`
+(the store machine's only index-miss shape, since `StoreTransitionError` has no bare
+`.outOfBounds`), bare and wrapped, as expected rejections on a `valid: false` step, the
+reference runner's `AssertionError` / `IndexError` set; a stray `.missingKey` propagates as a
+failure.
+
+The execution-payload-envelope signature check (`verifyExecutionPayloadEnvelopeSignature`)
+reads `state.validators[proposer_index]` / `state.builders[builder_index]` through `sszGetIdx`,
+so an out-of-range index (the `builder_index` comes straight from the untrusted envelope) is
+the spec's `IndexError` as `.transition (.outOfBounds idx bound)`, caught by the reference
+runner and by `checkStepValidity`. The function is `Except StoreTransitionError Bool`; its
+caller binds the result before the `assert`, so the reject propagates in place of the former
+panicking `[i]!`.
 
 The Gloas fork choice is the node-based (`ForkChoiceNode = (root, payload_status)`)
 ePBS rewrite: `get_ancestor` / `is_ancestor` / `get_weight` / `get_node_children` /
