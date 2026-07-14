@@ -306,27 +306,36 @@ stable shuffling, FFG-competitive, finalizing, proposed on time, exactly one slo
 back, and its parent is strong; or, more aggressively, when the head is weak and the
 previous slot had a proposer equivocation. Otherwise keep the head. -/
 forkdef getProposerHead (store : Store map) (headRoot : Root) (slot : Slot) : StoreTransition Root := do
-  match FcMap.lookup store.blocks headRoot with
-  | none => pure headRoot
-  | some headBlock =>
-    let parentRoot := headBlock.parentRoot
-    match FcMap.lookup store.blocks parentRoot with
-    | none => pure headRoot
-    | some parentBlock =>
-      let currentTimeOk := headBlock.slot + 1 == slot
-      let singleSlotReorg := parentBlock.slot + 1 == headBlock.slot && currentTimeOk
-      let headWeak ← isHeadWeak store headRoot
-      -- The spec asserts `proposer_boost_root != head_root` (boost has worn off);
-      -- modeled defensively as keeping the head rather than a raise (an optional
-      -- helper; deliberate deviation, see the LANDED note). Only the Dict reads
-      -- above convert to throwing.
-      if store.proposerBoostRoot == headRoot then pure headRoot
-      else if (← isHeadLate store headRoot) && isShufflingStable slot
-          && (← isFfgCompetitive store headRoot parentRoot)
-          && isFinalizationOk store slot && isProposingOnTime store && singleSlotReorg
-          && headWeak && (← isParentStrong store headRoot) then pure parentRoot
-      else if headWeak && currentTimeOk && (← isProposerEquivocation store headRoot) then pure parentRoot
-      else pure headRoot
+  -- `store.blocks[head_root]` / `store.blocks[parent_root]` are plain `Dict` reads that
+  -- raise on a miss (phase0 `get_proposer_head`).
+  let headBlock ← FcMap.getOrThrow store.blocks headRoot
+  let parentRoot := headBlock.parentRoot
+  let parentBlock ← FcMap.getOrThrow store.blocks parentRoot
+  -- pyspec binds every predicate to a local before the two `all([...])` checks, so each
+  -- (throwing) read runs unconditionally and in this order. A lazy `&&` would skip a raise
+  -- the spec performs (e.g. `is_ffg_competitive`'s `unrealized_justifications` reads when
+  -- `is_head_late` is already false), so bind them all eagerly to reject exactly where
+  -- pyspec does. `isShufflingStable` is the pinned `is_epoch_boundary` (identical formula,
+  -- `slot % SLOTS_PER_EPOCH != 0`).
+  let headLate ← isHeadLate store headRoot
+  let epochBoundary := isShufflingStable slot
+  let ffgCompetitive ← isFfgCompetitive store headRoot parentRoot
+  let finalizationOk := isFinalizationOk store slot
+  let proposingOnTime := isProposingOnTime store
+  let currentTimeOk := headBlock.slot + 1 == slot
+  let singleSlotReorg := parentBlock.slot + 1 == headBlock.slot && currentTimeOk
+  -- `assert proposer_boost_root != head_root` (the boost has worn off): a faithful raise,
+  -- where this was previously modeled defensively as keeping the head. Placed after the
+  -- timing predicates and before the weight ones (`is_head_weak` / `is_parent_strong` /
+  -- `is_proposer_equivocation`), matching the spec's statement order. Vectorless.
+  assert (store.proposerBoostRoot != headRoot)
+  let headWeak ← isHeadWeak store headRoot
+  let parentStrong ← isParentStrong store headRoot
+  let proposerEquivocation ← isProposerEquivocation store headRoot
+  if headLate && epochBoundary && ffgCompetitive && finalizationOk && proposingOnTime
+      && singleSlotReorg && headWeak && parentStrong then pure parentRoot
+  else if headWeak && currentTimeOk && proposerEquivocation then pure parentRoot
+  else pure headRoot
 
 /-! ## Checkpoint updates -/
 
@@ -688,4 +697,31 @@ private def pinBalanceUnderflowThrows : Bool :=
   | .error (.arithmetic _) _ => true
   | _ => false
 example : pinBalanceUnderflowThrows = true := by native_decide
+
+/-- `getProposerHead` rejects (`.assert`) the restored `proposer_boost_root != head_root`
+guard: with the head and its parent present in `store.blocks`, the reads that precede the
+assert seeded (`blockTimeliness[head]` for `is_head_late`, `unrealizedJustifications` for
+head and parent for `is_ffg_competitive`), and the boost root equal to the head, the assert
+is the first reject, exactly as on a well-formed store handed in by `get_head`. Vectorless
+(a valid `get_proposer_head` is only reached once the boost has worn off). `native_decide`
+to keep the `BeaconBlock` reduction out of the kernel. -/
+private def pinProposerHeadBoostRejects : Bool :=
+  letI : Preset := minimal
+  letI : Config := minimalConfig
+  letI : HasherTag := fastHasherTag
+  let headBlock : @EthCLSpecs.Fulu.BeaconBlock minimal := default
+  let blocks := FcMap.insert (FcMap.insert FcMap.empty pinRoot headBlock) headBlock.parentRoot headBlock
+  let timeliness := FcMap.insert FcMap.empty pinRoot true
+  let uj := FcMap.insert (FcMap.insert FcMap.empty pinRoot (default : Checkpoint))
+    headBlock.parentRoot (default : Checkpoint)
+  let store := { pinStore with
+      blocks := blocks
+      blockTimeliness := timeliness
+      unrealizedJustifications := uj
+      proposerBoostRoot := pinRoot }
+  match (getProposerHead (map := treeMap) store pinRoot 0 : PinM Root).run store with
+  | .error (.assert _) _ => true
+  | _ => false
+example : pinProposerHeadBoostRejects = true := by native_decide
+
 end EthCLSpecs.Fulu
