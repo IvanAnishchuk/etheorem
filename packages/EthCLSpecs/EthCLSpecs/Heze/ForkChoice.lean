@@ -190,17 +190,21 @@ forkdef processInclusionList (store : InclusionListStore map) (inclusionList : I
 `slot` in committee-index order, then take the first `INCLUSION_LIST_COMMITTEE_SIZE` members
 cyclically (`cyclicSample`, in `Heze/Committees.lean`). Relocated from the beacon-state accessors
 into this store-throwing block beside its sole caller `getInclusionListTransactions`: the spec's
-`indices[i % len(indices)]` raises `ZeroDivisionError` when the slot has no committee members, so
-`assert (indices.size != 0)` throws the fork-choice reject rather than silently sampling a
-`default`. `state` stays an explicit parameter (the accessor reads `state`, not the store), and
-the block's `[MonadExceptOf StoreTransitionError]` resolves `assert` to the store reject. -/
+`indices[i % len(indices)]` raises `ZeroDivisionError` when the slot has no committee members.
+That is an uncaught fault (the reference runner catches only `AssertionError` / `IndexError`), so
+the empty case throws `.transition (.arithmetic …)` (a `uncaughtFault`, NOT an expected rejection)
+rather than a caught `.assert`, matching how `balanceAfterWithdrawals` models the sibling `uint64`
+fault, and rather than silently sampling a `default`. `state` stays an explicit parameter (the
+accessor reads `state`, not the store). -/
 forkdef getInclusionListCommittee (state : State) (slot : Slot) :
     StoreTransition (Vector ValidatorIndex Const.inclusionListCommitteeSize) := do
   let epoch := computeEpochAtSlot slot
   let committeesPerSlot := getCommitteeCountPerSlot state epoch
   let indices := (Array.range committeesPerSlot).foldl
     (fun acc i => acc ++ getBeaconCommittee state slot i) (#[] : Array ValidatorIndex)
-  assert (indices.size != 0)
+  if indices.size == 0 then
+    throw (StoreTransitionError.transition
+      (.arithmetic "get_inclusion_list_committee: indices[i % len(indices)] on an empty committee"))
   pure (cyclicSample indices Const.inclusionListCommitteeSize)
 
 /-- `get_inclusion_list_transactions(store, state, slot, only_timely=True)`
@@ -385,11 +389,14 @@ True`, and the EL verdict comes from `isInclusionListSatisfied`, which reads the
 `[ExecutionEngine]` seam (the spec's `execution_engine` argument, modeled injectably). -/
 forkdef recordPayloadInclusionListSatisfaction (store : Store map) (state : State) (root : Root)
     (payload : ExecutionPayload) : StoreTransition (Store map) := do
-  -- The spec reads `Slot(state.slot - 1)`, a `uint64` subtraction that raises on a slot-0
-  -- state (invalidating the whole envelope). Assert `state.slot != 0` rather than silently
-  -- substituting an empty required set.
+  -- The spec reads `Slot(state.slot - 1)`, a `uint64` subtraction that raises `ValueError` on a
+  -- slot-0 state (invalidating the whole envelope). That fault is uncaught by the reference
+  -- runner, so throw `.transition (.arithmetic …)` (a `uncaughtFault`, not an expected rejection),
+  -- matching `balanceAfterWithdrawals`, rather than a caught `.assert` or a silent empty set.
   let stateSlot := sszGet state slot
-  assert (stateSlot != 0)
+  if stateSlot == 0 then
+    throw (StoreTransitionError.transition
+      (.arithmetic "record_payload_inclusion_list_satisfaction: Slot(state.slot - 1) underflow at slot 0"))
   let ilTxs ← getInclusionListTransactions store.inclusionListStore state (stateSlot - 1)
   let satisfied := isInclusionListSatisfied payload ilTxs
   pure { store with
@@ -581,10 +588,12 @@ private def pinIlDueMs : UInt64 :=
 #guard pinIlDueMs = 4000
 
 /-- The faithful empty-committee throw. Over a zero-validator `default BeaconState` (at `slot :=
-1`, so the `state.slot != 0` underflow assert passes), `slot - 1`'s beacon committee is empty, so
-`getInclusionListCommittee` (reached through the record path) hits `assert (indices.size != 0)`
-and rejects. Pyspec raises `ZeroDivisionError` on the same `indices[i % 0]`. This pins the throw
-that the populated `pinRecordSatisfied` / `pinRecordRefuted` below deliberately avoid. `State` is
+1`, so the `state.slot != 0` underflow throw does not fire), `slot - 1`'s beacon committee is
+empty, so `getInclusionListCommittee` (reached through the record path) hits the empty-committee
+guard and rejects. Pyspec raises `ZeroDivisionError` on the same `indices[i % 0]`, an uncaught
+fault, so the pin checks the reject is NOT an expected rejection (a `.transition (.arithmetic …)`,
+not a caught `.assert`), the property a regression to `assert` would break. This is the throw the
+populated `pinRecordSatisfied` / `pinRecordRefuted` below deliberately avoid. `State` is
 FFI-backed (`FastBox`), so `native_decide`. -/
 private def pinCommitteeThrows : Bool :=
   letI : Preset := minimal
@@ -595,13 +604,13 @@ private def pinCommitteeThrows : Bool :=
   match (recordPayloadInclusionListSatisfaction (map := treeMap) store state pinPilsRoot
       (default : @EthCLSpecs.Heze.ExecutionPayload minimal) : PinM (Store treeMap)).run store with
   | .ok _ _    => false
-  | .error _ _ => true
+  | .error e _ => !e.isExpectedRejection
 example : pinCommitteeThrows = true := by native_decide
 
 /-- A minimal populated `BeaconState`: `SLOTS_PER_EPOCH` active validators at `slot := 1`. Enough
 that slot-0's beacon committee is non-empty (`computeCommittee` takes the shuffled slice
 `[0, N // SLOTS_PER_EPOCH) = [0, 1)`), so the record path's `getInclusionListCommittee` clears its
-`assert (indices.size != 0)` instead of throwing. A `default` validator has `exitEpoch = 0`, hence
+empty-committee guard instead of throwing. A `default` validator has `exitEpoch = 0`, hence
 inactive, so only `exitEpoch := farFutureEpoch` is overridden (`is_active_validator` needs
 `activationEpoch ≤ epoch < exitEpoch`, and `activationEpoch` is already `0`). Effective balance is
 irrelevant here: `computeCommittee` is a plain shuffled slice, not balance-weighted. The registry
@@ -617,7 +626,7 @@ private def pinPopulatedState : @EthCLSpecs.Heze.BeaconState minimal :=
 
 /-- `record_payload_inclusion_list_satisfaction` records the engine verdict at `root`: with
 the optimistic default (`isInclusionListSatisfied = true`) it writes `true`. `slot := 1` clears the
-faithful `state.slot != 0` underflow assert, and the populated validator set (`pinPopulatedState`)
+`state.slot != 0` underflow throw, and the populated validator set (`pinPopulatedState`)
 gives `slot - 1` a non-empty beacon committee, so the record path runs end-to-end through
 `getInclusionListCommittee` without hitting its empty-committee throw. The recorded verdict is
 `true` regardless of the required transactions (the optimistic oracle ignores `ilTxs`), so what
