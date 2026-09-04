@@ -7,9 +7,8 @@ SizzLean imports), so any proof module can import it whatever layer it sits on.
 `Proofs/BitPack.lean` and `Proofs/UIntWide.lean` take `get!_eq_getElem`, which
 therefore has one home in this namespace.
 
-The `Array` pair lives here and not in the Merkle-tree shapes module. The
-completeness proof then reaches a generic array fact without importing tree
-vocabulary.
+The `Array` pair lives here so the completeness proof reaches a generic array
+fact without importing the Merkle-tree vocabulary.
 -/
 
 set_option autoImplicit false

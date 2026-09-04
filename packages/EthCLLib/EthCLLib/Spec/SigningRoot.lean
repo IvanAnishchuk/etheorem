@@ -64,8 +64,8 @@ def computeSigningRoot [HasherTag] {T : Type} [SSZRepr T] (obj : T)
   htr { objectRoot := htr obj, domain : SigningData }
 
 /-- `compute_merkle_branch_root(leaf, branch, depth, index)`
-(`beacon-chain.md:782-798`): fold `branch` into `leaf`. Level `i` mixes its
-sibling in on the side that bit `i` of `index` picks.
+(`phase0/beacon-chain.md:782-798`): fold `branch` into `leaf`. Level `i` mixes
+its sibling in on the side that bit `i` of `index` picks.
 
 `routeRight` names that side. The pyspec spells the bit `index // (2**i) % 2`
 inline, and `routeRight_eq_div_mod` holds the two spellings together. One
@@ -73,10 +73,10 @@ definition therefore carries the convention for this check and for the honest
 openers both.
 
 A `branch[i]` read past the end raises `IndexError`, which the reference runner's
-`expect_assertion_error` catches. The read is therefore a checked reject and not
-a defaulted one. The carrier is `IndexError` rather than either machine's reject,
-because this function reads no state. A caller routes the miss through `liftErr`
-to whichever machine it runs on. -/
+`expect_assertion_error` catches. The read is therefore a checked reject. The
+carrier is `IndexError`, which belongs to no machine, because this function reads
+no state. A caller routes the miss through `liftErr` to whichever machine it runs
+on. -/
 def computeMerkleBranchRoot [HasherTag] (leaf : Vector UInt8 32)
     (branch : Array (Vector UInt8 32)) (depth index : Nat) :
     Except SizzLean.Cache.IndexError (Vector UInt8 32) := do
@@ -89,13 +89,14 @@ def computeMerkleBranchRoot [HasherTag] (leaf : Vector UInt8 32)
       else Hasher.combine (H := HasherTag.H) value sibling
   return bytesToRoot value
 
-/-- `is_valid_merkle_branch(leaf, branch, depth, index, root)` (`:800-812`):
-reject on `depth != len(branch)`, else compare the reconstructed root. Used by
-`processDeposit` against `eth1Data.depositRoot`.
+/-- `is_valid_merkle_branch(leaf, branch, depth, index, root)`
+(`phase0/beacon-chain.md:800-812`): reject on `depth != len(branch)`, else
+compare the reconstructed root. Used by `processDeposit` against
+`eth1Data.depositRoot`.
 
 The guard runs first, so the fold reads `branch` only in range. The reject arm is
-therefore unreachable from here. The spec returns `False` on the guard and never
-reaches its raise either. -/
+therefore unreachable from here. The spec returns `False` on the guard, so it
+never reaches the out-of-range read either. -/
 def isValidMerkleBranch [HasherTag] (leaf : Vector UInt8 32)
     (branch : Array (Vector UInt8 32)) (depth : Nat) (index : Nat)
     (root : Vector UInt8 32) : Bool :=

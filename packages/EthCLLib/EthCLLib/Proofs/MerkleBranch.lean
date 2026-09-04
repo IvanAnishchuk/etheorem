@@ -4,7 +4,7 @@ import EthCLLib.Spec.SigningRoot
 # `EthCLLib.Proofs.MerkleBranch`: what `isValidMerkleBranch` accepts
 
 `EthCLLib.Spec.isValidMerkleBranch` is `is_valid_merkle_branch`
-(`specs/phase0/beacon-chain.md:800-812`).
+(`phase0/beacon-chain.md:800-812`).
 
 Past the length guard, the check reduces to a plain fold of `branch` over `leaf`,
 compared to `root`.
@@ -27,7 +27,7 @@ open EthCLLib.Spec
 `computeMerkleBranchRoot` runs its fold in `Except` and wraps the result, neither
 of which an induction can peel. `branchFold` is the same walk as a plain
 `ByteArray` function, `private` and proof-local. It models nothing the spec
-declares, and `computeMerkleBranchRoot_eq_branchFold` is the only way in. -/
+declares, and `computeMerkleBranchRoot_eq_branchFold` is the only bridge to it. -/
 
 /-- The branch walk as a bare fold, reading siblings straight out of `branch`. -/
 private def branchFold [HasherTag] (leaf : ByteArray)

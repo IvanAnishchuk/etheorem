@@ -1,17 +1,17 @@
 /-!
 # `EthCLLib.Spec.MerklePath`: the path-routing convention
 
-Which side the walk mixes a sibling in on at each level of a Merkle path. The
-spec's branch walk routes by this, and so do the honest openers in
-`EthCLLib.Proofs.MerkleOpening`. The pyspec spells the same bit
+A Merkle path mixes each sibling in on one side at each level, and this module
+picks that side. The spec's branch walk routes by it, and so do the honest
+openers in `EthCLLib.Proofs.MerkleOpening`. The pyspec spells the same bit
 `index // (2**i) % 2`.
 
 Level `i` reads bit `i` of `index`. A set bit puts the opened node on the right,
 so its sibling goes on the left.
 
-The convention belongs to `is_valid_merkle_branch`, which is a consensus-spec
-function rather than an SSZ-document one. It therefore lives framework-side, and
-SizzLean never sees it. A leaf module with no imports, so any layer can take it.
+The convention belongs to `is_valid_merkle_branch`, a consensus-spec function
+that the SSZ document never defines. It therefore lives framework-side, and
+SizzLean never sees it. The module imports nothing, so any layer can take it.
 -/
 
 set_option autoImplicit false
@@ -31,10 +31,11 @@ def routeRight (index i : Nat) : Bool := (index >>> i) &&& 1 == 1
 is the only thing that ties our spelling to the spec's, so keep it even when no
 proof needs it to typecheck.
 
-The convention is worth pinning because inverting it is root-preserving on a
+The convention is worth pinning because inverting it preserves the root on a
 shape-symmetric perfect tree. The walk opens the mirror leaf, mixes the sibling
-in on the mirror side, and reconstructs an identical root. Round-trip proofs
-therefore stay green under an inverted convention. Asymmetric shapes do notice. -/
+in on the mirror side, and rebuilds an identical root. Round-trip proofs
+therefore still pass under an inverted convention. An asymmetric shape
+reconstructs a different root, and there the convention shows. -/
 theorem routeRight_eq_div_mod (index i : Nat) :
     routeRight index i = (index / 2 ^ i % 2 == 1) := by
   show ((index >>> i) &&& 1 == 1) = (index / 2 ^ i % 2 == 1)
