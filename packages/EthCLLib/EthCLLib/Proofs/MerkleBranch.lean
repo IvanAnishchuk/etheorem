@@ -84,12 +84,17 @@ private theorem computeMerkleBranchRoot_eq_branchFold [HasherTag]
   rw [branchFoldM_ok branch index depth hb (vecToBytes leaf)]
   rfl
 
-/-! ### Past the guard -/
+/-! ### Past the guard
+
+Both theorems below state their right-hand side with `branchFold`, which is
+`private`. They are `private` too: outside this module the helper carries no
+name, so no goal could ever match them. They serve the theorems in this module
+that state the check's contract over shipped functions alone. -/
 
 /-- A well-formed branch has `branch.size = depth`, which the honest opening
 satisfies. The length guard then passes, and `isValidMerkleBranch` is the
 byte-root of the branch walk compared to `root`. -/
-theorem isValidMerkleBranch_eq_beq [HasherTag] (leaf : Vector UInt8 32)
+private theorem isValidMerkleBranch_eq_beq [HasherTag] (leaf : Vector UInt8 32)
     (branch : Array (Vector UInt8 32)) (depth index : Nat) (root : Vector UInt8 32)
     (hsize : branch.size = depth) :
     isValidMerkleBranch leaf branch depth index root
@@ -106,7 +111,7 @@ check accepts iff the left/right fold of `branch` over `leaf` reconstructs
 length mismatch, where the check returns `false` whatever the fold produces.
 
 The proof closes symbolically, so no compiler axiom enters. -/
-theorem isValidMerkleBranch_iff [HasherTag] (leaf : Vector UInt8 32)
+private theorem isValidMerkleBranch_iff [HasherTag] (leaf : Vector UInt8 32)
     (branch : Array (Vector UInt8 32)) (depth index : Nat) (root : Vector UInt8 32)
     (hsize : branch.size = depth) :
     isValidMerkleBranch leaf branch depth index root = true
