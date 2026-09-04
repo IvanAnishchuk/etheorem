@@ -9,8 +9,7 @@ shape modules can import it without layering concerns.
 The `Array` pair lives here and not in the Merkle-tree shapes module. The
 completeness proof then reaches a generic array fact without importing tree
 vocabulary. `Proofs/BitPack.lean` and `Proofs/UIntWide.lean` import
-`get!_eq_getElem` from here. All three declared it once each before, in this one
-namespace, so any change to the statement broke whichever module loaded second.
+`get!_eq_getElem` from here, so the statement has one home in this namespace.
 -/
 
 set_option autoImplicit false
