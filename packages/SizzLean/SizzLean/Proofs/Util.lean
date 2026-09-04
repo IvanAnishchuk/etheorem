@@ -3,13 +3,13 @@
 
 Generic, dependency-free lemmas shared across the proof layers: the `getElem!` /
 `get!` bridges for `Array` and `ByteArray` push/reads. A leaf module (no
-SizzLean imports), so both the `Spec` proof files and the `Cache/MerkleTree`
-shape modules can import it without layering concerns.
+SizzLean imports), so any proof module can import it whatever layer it sits on.
+`Proofs/BitPack.lean` and `Proofs/UIntWide.lean` take `get!_eq_getElem`, which
+therefore has one home in this namespace.
 
 The `Array` pair lives here and not in the Merkle-tree shapes module. The
 completeness proof then reaches a generic array fact without importing tree
-vocabulary. `Proofs/BitPack.lean` and `Proofs/UIntWide.lean` import
-`get!_eq_getElem` from here, so the statement has one home in this namespace.
+vocabulary.
 -/
 
 set_option autoImplicit false
