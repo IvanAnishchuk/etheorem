@@ -19,7 +19,6 @@ set_option autoImplicit false
 namespace EthCLLib.Proofs
 
 open SizzLean
-open SizzLean.Hasher
 open EthCLLib.Spec
 
 /-! ### The proof-side fold
@@ -55,7 +54,7 @@ induction has to step the fold without `computeMerkleBranchRoot`'s closing wrap
 in the way. It generalises over the accumulator for the same reason. -/
 private theorem branchFoldM_ok [HasherTag] (branch : Array (Vector UInt8 32)) (index : Nat) :
     ∀ (depth : Nat), depth ≤ branch.size → ∀ (leaf : ByteArray),
-      (List.range depth).foldlM (m := Except SizzLean.Cache.IndexError) (init := leaf)
+      (List.range depth).foldlM (m := Except Cache.IndexError) (init := leaf)
           (fun value i => do
             let sibling ←
               if h : i < branch.size then pure (vecToBytes branch[i])
